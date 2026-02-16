@@ -1,6 +1,6 @@
 # deeprepo
 
-**Deep codebase intelligence powered by recursive multi-model orchestration.** Analyzes entire codebases — any size — by orchestrating cheap sub-LLM workers through a recursive language model pattern. Finds bugs, maps architecture, and produces prioritized development plans for under $1.50/run.
+**Deep codebase intelligence powered by recursive multi-model orchestration.** Analyzes entire codebases — any size — by orchestrating cheap sub-LLM workers through a recursive language model pattern. Finds bugs, maps architecture, and produces prioritized development plans starting at $0.74/run.
 
 ```
 $ deeprepo analyze https://github.com/your-org/your-repo
