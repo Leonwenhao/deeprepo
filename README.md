@@ -85,7 +85,7 @@ On larger codebases (5M+ chars), baseline coverage drops below 20%. RLM scales t
 ### Install
 
 ```bash
-git clone https://github.com/[your-username]/deeprepo.git
+git clone https://github.com/Leonwenhao/deeprepo.git
 cd deeprepo
 pip install -e .
 ```
