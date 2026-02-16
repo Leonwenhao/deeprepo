@@ -1,0 +1,15 @@
+{
+  "mode": "baseline",
+  "root_model": "claude-opus-4-6",
+  "repo": "/tmp/fastapi/fastapi",
+  "root_calls": 1,
+  "root_input_tokens": 47596,
+  "root_output_tokens": 3633,
+  "root_cost": 0.986415,
+  "total_cost": 0.986415,
+  "included_files": 42,
+  "excluded_files": 5,
+  "prompt_chars": 174944,
+  "elapsed_seconds": 80.46273493766785,
+  "analysis_chars": 12793
+}

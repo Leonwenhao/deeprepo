@@ -117,7 +117,8 @@ def cmd_compare(args):
     from .rlm_scaffold import run_analysis
     from .baseline import run_baseline
 
-    root_model = ROOT_MODEL_MAP.get(args.root_model, args.root_model)
+    rlm_model = ROOT_MODEL_MAP.get(args.root_model, args.root_model)
+    baseline_model = ROOT_MODEL_MAP.get(args.baseline_model, args.baseline_model)
 
     # Clone once if git URL, reuse for both runs
     actual_path = args.path
@@ -127,23 +128,23 @@ def cmd_compare(args):
         actual_path = clone_repo(args.path)
         print(f"Cloned to {actual_path}")
 
-    print("\nRunning RLM analysis...")
+    print(f"\nRunning RLM analysis (root: {rlm_model})...")
     print("=" * 60)
 
     rlm_result = run_analysis(
         codebase_path=actual_path,
         verbose=not args.quiet,
         max_turns=args.max_turns,
-        root_model=root_model,
+        root_model=rlm_model,
     )
 
-    print("\n\nRunning baseline analysis...")
+    print(f"\n\nRunning baseline analysis (root: {baseline_model})...")
     print("=" * 60)
 
     baseline_result = run_baseline(
         codebase_path=actual_path,
         verbose=not args.quiet,
-        root_model=root_model,
+        root_model=baseline_model,
     )
 
     # Save both
@@ -155,20 +156,63 @@ def cmd_compare(args):
     (output_dir / f"deeprepo_{repo_name}_{timestamp}.md").write_text(rlm_result["analysis"])
     (output_dir / f"baseline_{repo_name}_{timestamp}.md").write_text(baseline_result["analysis"])
 
+    # Save metrics JSON for both sides
+    rlm_metrics = {
+        "mode": "rlm",
+        "root_model": rlm_model,
+        "repo": args.path,
+        "turns": rlm_result["turns"],
+        "root_calls": rlm_result["usage"].root_calls,
+        "sub_calls": rlm_result["usage"].sub_calls,
+        "root_input_tokens": rlm_result["usage"].root_input_tokens,
+        "root_output_tokens": rlm_result["usage"].root_output_tokens,
+        "sub_input_tokens": rlm_result["usage"].sub_input_tokens,
+        "sub_output_tokens": rlm_result["usage"].sub_output_tokens,
+        "root_cost": rlm_result["usage"].root_cost,
+        "sub_cost": rlm_result["usage"].sub_cost,
+        "total_cost": rlm_result["usage"].total_cost,
+        "analysis_chars": len(rlm_result["analysis"]),
+    }
+    baseline_metrics = {
+        "mode": "baseline",
+        "root_model": baseline_model,
+        "repo": args.path,
+        "root_calls": baseline_result["usage"].root_calls,
+        "root_input_tokens": baseline_result["usage"].root_input_tokens,
+        "root_output_tokens": baseline_result["usage"].root_output_tokens,
+        "root_cost": baseline_result["usage"].root_cost,
+        "total_cost": baseline_result["usage"].total_cost,
+        "included_files": len(baseline_result["included_files"]),
+        "excluded_files": len(baseline_result["excluded_files"]),
+        "prompt_chars": baseline_result["prompt_chars"],
+        "elapsed_seconds": baseline_result["elapsed_seconds"],
+        "analysis_chars": len(baseline_result["analysis"]),
+    }
+    (output_dir / f"deeprepo_{repo_name}_{timestamp}_metrics.json").write_text(
+        json.dumps(rlm_metrics, indent=2)
+    )
+    (output_dir / f"baseline_{repo_name}_{timestamp}_metrics.json").write_text(
+        json.dumps(baseline_metrics, indent=2)
+    )
+
     # Print comparison
     print("\n" + "=" * 60)
     print("COMPARISON")
     print("=" * 60)
-    print(f"\n{'Metric':<30} {'RLM':<20} {'Baseline':<20}")
-    print("-" * 70)
-    print(f"{'Total cost':<30} ${rlm_result['usage'].total_cost:<19.4f} ${baseline_result['usage'].total_cost:<19.4f}")
+    print(f"\n{'Metric':<30} {'RLM':<25} {'Baseline':<25}")
+    print("-" * 80)
+    print(f"{'Root model':<30} {rlm_result['usage'].root_model_label:<25} {baseline_result['usage'].root_model_label:<25}")
+    print(f"{'Total cost':<30} ${rlm_result['usage'].total_cost:<24.4f} ${baseline_result['usage'].total_cost:<24.4f}")
+    print(f"{'Root cost':<30} ${rlm_result['usage'].root_cost:<24.4f} ${baseline_result['usage'].root_cost:<24.4f}")
+    print(f"{'Sub-LLM cost':<30} ${rlm_result['usage'].sub_cost:<24.4f} {'N/A':<25}")
     print(f"{'Root tokens (in/out)':<30} {rlm_result['usage'].root_input_tokens:,}/{rlm_result['usage'].root_output_tokens:,} {'':<5} {baseline_result['usage'].root_input_tokens:,}/{baseline_result['usage'].root_output_tokens:,}")
-    print(f"{'Sub-LLM calls':<30} {rlm_result['usage'].sub_calls:<20} {'N/A':<20}")
-    print(f"{'REPL turns':<30} {rlm_result['turns']:<20} {'1':<20}")
-    print(f"{'Analysis length (chars)':<30} {len(rlm_result['analysis']):,}{'':<14} {len(baseline_result['analysis']):,}")
+    print(f"{'Sub-LLM calls':<30} {rlm_result['usage'].sub_calls:<25} {'N/A':<25}")
+    print(f"{'Sub tokens (in/out)':<30} {rlm_result['usage'].sub_input_tokens:,}/{rlm_result['usage'].sub_output_tokens:,} {'':<5} {'N/A':<25}")
+    print(f"{'REPL turns':<30} {rlm_result['turns']:<25} {'1':<25}")
+    print(f"{'Analysis length (chars)':<30} {len(rlm_result['analysis']):,}{'':<19} {len(baseline_result['analysis']):,}")
 
     if baseline_result.get("excluded_files"):
-        print(f"{'Files excluded (context limit)':<30} {'0':<20} {len(baseline_result['excluded_files']):<20}")
+        print(f"{'Files excluded (context limit)':<30} {'0':<25} {len(baseline_result['excluded_files']):<25}")
 
     print(f"\nOutputs saved to: {output_dir}/")
 
@@ -205,6 +249,11 @@ def main():
     # compare command
     p_compare = subparsers.add_parser("compare", parents=[common], help="Run both and compare")
     p_compare.add_argument("--max-turns", type=int, default=15, help="Max REPL turns for RLM")
+    p_compare.add_argument(
+        "--baseline-model",
+        default="opus",
+        help="Root model for baseline side: opus (default), sonnet, or a full model string",
+    )
     p_compare.set_defaults(func=cmd_compare)
 
     args = parser.parse_args()
