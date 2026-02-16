@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deeprepo"
+version = "0.1.0"
+description = "Deep codebase intelligence powered by recursive multi-model orchestration"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.50.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[project.scripts]
+deeprepo = "src.cli:main"

@@ -1,0 +1,8 @@
+{
+  "database": "tasks.db",
+  "host": "0.0.0.0",
+  "port": 5000,
+  "debug": true,
+  "secret_key": "super_secret_key_123",
+  "max_tasks_per_user": 100
+}

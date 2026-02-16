@@ -1,0 +1,15 @@
+{
+  "mode": "rlm",
+  "root_model": "claude-sonnet-4-5-20250929",
+  "repo": "https://github.com/Leonwenhao/jianghu-game",
+  "turns": 4,
+  "root_calls": 4,
+  "sub_calls": 9,
+  "root_input_tokens": 79341,
+  "root_output_tokens": 32407,
+  "sub_input_tokens": 11547,
+  "sub_output_tokens": 11565,
+  "root_cost": 0.724128,
+  "sub_cost": 0.015031,
+  "total_cost": 0.739159
+}
