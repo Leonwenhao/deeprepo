@@ -1,0 +1,15 @@
+{
+  "mode": "rlm",
+  "root_model": "claude-sonnet-4-5-20250929",
+  "repo": "/tmp/fastapi/fastapi",
+  "turns": 2,
+  "root_calls": 2,
+  "sub_calls": 12,
+  "root_input_tokens": 14981,
+  "root_output_tokens": 15520,
+  "sub_input_tokens": 26568,
+  "sub_output_tokens": 14448,
+  "root_cost": 0.277743,
+  "sub_cost": 0.021206400000000004,
+  "total_cost": 0.29894940000000003
+}

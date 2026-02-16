@@ -254,23 +254,142 @@ class RLMEngine:
 
         return namespace
 
+    @staticmethod
+    def _is_prose_line(line: str) -> bool:
+        """Check if a line looks like English prose rather than Python code."""
+        stripped = line.strip()
+        if not stripped:
+            return False
+        # Common prose starters
+        prose_starters = (
+            "Let ", "Now ", "Here ", "The ", "This ", "That ",
+            "I ", "We ", "It ", "Note ", "Next ", "First ",
+            "Second ", "Finally ", "However ", "Also ",
+        )
+        if stripped.startswith(prose_starters):
+            return True
+        # Markdown list markers
+        if re.match(r'^(\*\s+|- |\d+\.\s|> )', stripped):
+            return True
+        # General pattern: capitalized word followed by space (prose sentence)
+        if re.match(r'^[A-Z][a-z]+ ', stripped):
+            return True
+        return False
+
+    def _split_wrapped_blocks(self, blocks: list[str]) -> list[str]:
+        """Handle blocks where the model wrapped prose + code in one fence.
+
+        When the model produces a single fenced block that starts with
+        English prose and contains inner ```python / ``` markers, extract
+        only the inner fenced code sections.  Blocks that start with
+        Python code are returned unchanged.
+        """
+        result: list[str] = []
+        for block in blocks:
+            # Skip empty / whitespace-only blocks
+            if not block.strip():
+                continue
+            blines = block.split("\n")
+            first_nonblank = next((l for l in blines if l.strip()), "")
+            has_inner_fence = any(
+                re.match(r'^```(?:python)?\s*$', l) for l in blines
+            )
+            if self._is_prose_line(first_nonblank) and has_inner_fence:
+                # Re-parse: extract inner fenced sections
+                inner = self._extract_inner_fences(blines)
+                if inner:
+                    result.extend(inner)
+                # else: drop entirely (pure prose)
+            else:
+                result.append(block)
+        return result
+
+    def _extract_inner_fences(self, lines: list[str]) -> list[str]:
+        """Extract code from inner ```python / ``` pairs within a block."""
+        blocks: list[str] = []
+        i = 0
+        while i < len(lines):
+            if re.match(r'^```(?:python)?\s*$', lines[i]):
+                i += 1
+                code_lines: list[str] = []
+                while i < len(lines):
+                    if re.match(r'^```\s*$', lines[i]):
+                        break
+                    code_lines.append(lines[i])
+                    i += 1
+                if code_lines:
+                    blocks.append("\n".join(code_lines))
+            i += 1
+        return blocks
+
     def _extract_code(self, response: str) -> list[str]:
-        """Extract Python code blocks from the model's response."""
-        # Match ```python ... ``` blocks where fences are at line boundaries.
-        # Using ^/$ with re.MULTILINE ensures we don't match ``` that
-        # appears mid-line inside Python strings (the root cause of
-        # premature code-block truncation).
-        pattern = r'^```(?:python)?\s*\n(.*?)\n```\s*$'
-        blocks = re.findall(pattern, response, re.DOTALL | re.MULTILINE)
+        """Extract Python code blocks from the model's response.
+
+        Uses a line-by-line scanner instead of a single regex so that
+        triple-backticks appearing *inside* Python string literals
+        (e.g. f-strings that build sub-LLM prompts) are not mistaken
+        for the closing fence of the code block.
+        """
+        blocks: list[str] = []
+        lines = response.split("\n")
+        i = 0
+
+        while i < len(lines):
+            # Look for an opening fence at column 0
+            if re.match(r'^```(?:python)?\s*$', lines[i]):
+                i += 1
+                code_lines: list[str] = []
+                # Collect lines until we find the *real* closing fence
+                while i < len(lines):
+                    if re.match(r'^```\s*$', lines[i]):
+                        # Candidate closing fence — peek ahead to decide
+                        next_idx = i + 1
+                        # Skip blank lines when peeking
+                        while next_idx < len(lines) and lines[next_idx].strip() == "":
+                            next_idx += 1
+
+                        is_real_close = True
+                        if next_idx < len(lines):
+                            peek = lines[next_idx]
+                            # If the next non-empty line looks like continued
+                            # Python code, this ``` is inside a string literal
+                            if not (re.match(r'^```', peek)
+                                    or self._is_prose_line(peek)):
+                                is_real_close = False
+
+                        # Even if peek-ahead says "real close", check for
+                        # unbalanced triple quotes — that means we're still
+                        # inside a multi-line string literal.
+                        if is_real_close:
+                            accumulated = "\n".join(code_lines)
+                            if (accumulated.count('"""') % 2 == 1
+                                    or accumulated.count("'''") % 2 == 1):
+                                is_real_close = False
+
+                        if is_real_close:
+                            break  # accept this as the real closing fence
+                        else:
+                            # Inner fence (e.g. inside an f-string) — keep it
+                            code_lines.append(lines[i])
+                    else:
+                        code_lines.append(lines[i])
+                    i += 1
+
+                if code_lines:
+                    blocks.append("\n".join(code_lines))
+            i += 1
+
+        # Post-process: the model sometimes wraps prose + nested
+        # ```python blocks inside a single outer fence.  When the
+        # extracted block starts with prose, split it on inner fences.
+        blocks = self._split_wrapped_blocks(blocks)
 
         if not blocks:
-            # Try to find inline code that looks executable
+            # Fallback: try to find inline code that looks executable
             # (model might not use code fences)
-            lines = response.split("\n")
             code_lines = []
             in_code = False
             for line in lines:
-                # Heuristic: lines that look like Python code
                 stripped = line.strip()
                 if stripped.startswith(("import ", "from ", "print(", "for ", "if ",
                                         "answer[", "result", "files", "prompts",
@@ -282,8 +401,13 @@ class RLMEngine:
                 elif in_code and not stripped.startswith(("#", "```")):
                     in_code = False
 
+            # Bug 2 fix: reject if the block looks like prose
             if code_lines:
-                blocks = ["\n".join(code_lines)]
+                first_non_empty = next(
+                    (l.strip() for l in code_lines if l.strip()), ""
+                )
+                if not self._is_prose_line(first_non_empty):
+                    blocks = ["\n".join(code_lines)]
 
         return blocks
 

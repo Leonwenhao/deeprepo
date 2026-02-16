@@ -1,0 +1,15 @@
+{
+  "mode": "rlm",
+  "root_model": "claude-sonnet-4-5-20250929",
+  "repo": "/tmp/pydantic2/pydantic",
+  "turns": 4,
+  "root_calls": 4,
+  "sub_calls": 17,
+  "root_input_tokens": 65157,
+  "root_output_tokens": 25948,
+  "sub_input_tokens": 224722,
+  "sub_output_tokens": 24851,
+  "root_cost": 0.5846910000000001,
+  "sub_cost": 0.07228050000000001,
+  "total_cost": 0.6569715
+}
