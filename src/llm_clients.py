@@ -14,8 +14,6 @@ import anthropic
 import openai
 from dotenv import load_dotenv
 
-load_dotenv()
-
 
 # Root model pricing profiles (per million tokens)
 ROOT_MODEL_PRICING = {
@@ -88,6 +86,7 @@ class RootModelClient:
     """Claude Opus 4.6 / Sonnet 4.5 via Anthropic API — the strategic orchestrator."""
 
     def __init__(self, usage: TokenUsage, model: str = "claude-opus-4-6"):
+        load_dotenv()
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise EnvironmentError(
@@ -142,6 +141,7 @@ class OpenRouterRootClient:
     """MiniMax M2.5 (or other models) via OpenRouter — OpenAI-compatible API."""
 
     def __init__(self, usage: TokenUsage, model: str = "minimax/minimax-m2.5"):
+        load_dotenv()
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise EnvironmentError(
@@ -214,6 +214,7 @@ class SubModelClient:
         model: str = "minimax/minimax-m2.5",
         base_url: str = "https://openrouter.ai/api/v1",
     ):
+        load_dotenv()
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
             raise EnvironmentError(
@@ -223,6 +224,7 @@ class SubModelClient:
         self.async_client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.usage = usage
+        self._lock = asyncio.Lock()
 
     def query(self, prompt: str, system: str = "", max_tokens: int = 4096) -> str:
         """Synchronous single query to the sub-LLM."""
@@ -278,11 +280,12 @@ class SubModelClient:
             raise RuntimeError(f"Sub-LLM API error on {self.model}: {e}")
 
         latency_ms = (time.time() - t0) * 1000
-        self.usage.sub_calls += 1
-        if response.usage:
-            self.usage.sub_input_tokens += response.usage.prompt_tokens or 0
-            self.usage.sub_output_tokens += response.usage.completion_tokens or 0
-        self.usage.sub_latency_ms.append(latency_ms)
+        async with self._lock:
+            self.usage.sub_calls += 1
+            if response.usage:
+                self.usage.sub_input_tokens += response.usage.prompt_tokens or 0
+                self.usage.sub_output_tokens += response.usage.completion_tokens or 0
+            self.usage.sub_latency_ms.append(latency_ms)
 
         return response.choices[0].message.content or ""
 

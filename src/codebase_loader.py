@@ -18,11 +18,19 @@ CODE_EXTENSIONS = {
     ".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go", ".rs", ".rb",
     ".cpp", ".c", ".h", ".hpp", ".cs", ".php", ".swift", ".kt",
     ".sql", ".html", ".css", ".scss", ".vue", ".svelte",
+    # Shell
+    ".sh", ".bash", ".zsh",
+    # Languages
+    ".lua", ".r", ".R", ".scala", ".zig", ".dart", ".ex", ".exs",
 }
 
 CONFIG_EXTENSIONS = {
     ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".env",
     ".xml", ".conf",
+    # Data/schema
+    ".proto", ".graphql", ".prisma",
+    # Infrastructure
+    ".tf", ".hcl", ".dockerfile",
 }
 
 DOC_EXTENSIONS = {
@@ -30,6 +38,11 @@ DOC_EXTENSIONS = {
 }
 
 ALL_EXTENSIONS = CODE_EXTENSIONS | CONFIG_EXTENSIONS | DOC_EXTENSIONS
+
+# Extensionless files to include by exact filename
+EXTENSIONLESS_FILES = {
+    "Makefile", "Dockerfile", "Jenkinsfile", "Procfile",
+}
 
 # Directories to skip
 SKIP_DIRS = {
@@ -90,7 +103,7 @@ def load_codebase(path: str) -> dict:
             filepath = Path(dirpath) / filename
             ext = filepath.suffix.lower()
 
-            if ext not in ALL_EXTENSIONS:
+            if ext not in ALL_EXTENSIONS and filename not in EXTENSIONLESS_FILES:
                 continue
 
             rel_path = str(filepath.relative_to(root))

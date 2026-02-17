@@ -12,6 +12,7 @@ This implements the RLM pattern:
 
 import io
 import re
+import shutil
 import sys
 import time
 import traceback
@@ -458,6 +459,7 @@ def run_analysis(
     """
     # Validate path for local directories
     actual_path = codebase_path
+    is_temp = False
     if not codebase_path.startswith(("http://", "https://", "git@")):
         from pathlib import Path
         p = Path(codebase_path)
@@ -472,27 +474,32 @@ def run_analysis(
         if verbose:
             print(f"Cloning {codebase_path}...")
         actual_path = clone_repo(codebase_path)
+        is_temp = True
         if verbose:
             print(f"Cloned to {actual_path}")
 
-    # Set up clients
-    usage = TokenUsage()
-    usage.set_root_pricing(root_model)
-    root_client = create_root_client(usage=usage, model=root_model)
-    sub_client = SubModelClient(usage=usage)
+    try:
+        # Set up clients
+        usage = TokenUsage()
+        usage.set_root_pricing(root_model)
+        root_client = create_root_client(usage=usage, model=root_model)
+        sub_client = SubModelClient(usage=usage)
 
-    # Run the engine
-    engine = RLMEngine(
-        root_client=root_client,
-        sub_client=sub_client,
-        usage=usage,
-        max_turns=max_turns,
-        verbose=verbose,
-    )
+        # Run the engine
+        engine = RLMEngine(
+            root_client=root_client,
+            sub_client=sub_client,
+            usage=usage,
+            max_turns=max_turns,
+            verbose=verbose,
+        )
 
-    result = engine.analyze(actual_path)
+        result = engine.analyze(actual_path)
 
-    if verbose:
-        print(f"\n{usage.summary()}")
+        if verbose:
+            print(f"\n{usage.summary()}")
 
-    return result
+        return result
+    finally:
+        if is_temp:
+            shutil.rmtree(actual_path, ignore_errors=True)

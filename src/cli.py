@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -122,30 +123,36 @@ def cmd_compare(args):
 
     # Clone once if git URL, reuse for both runs
     actual_path = args.path
+    is_temp = False
     if args.path.startswith(("http://", "https://", "git@")):
         from .codebase_loader import clone_repo
         print(f"Cloning {args.path}...")
         actual_path = clone_repo(args.path)
+        is_temp = True
         print(f"Cloned to {actual_path}")
 
-    print(f"\nRunning RLM analysis (root: {rlm_model})...")
-    print("=" * 60)
+    try:
+        print(f"\nRunning RLM analysis (root: {rlm_model})...")
+        print("=" * 60)
 
-    rlm_result = run_analysis(
-        codebase_path=actual_path,
-        verbose=not args.quiet,
-        max_turns=args.max_turns,
-        root_model=rlm_model,
-    )
+        rlm_result = run_analysis(
+            codebase_path=actual_path,
+            verbose=not args.quiet,
+            max_turns=args.max_turns,
+            root_model=rlm_model,
+        )
 
-    print(f"\n\nRunning baseline analysis (root: {baseline_model})...")
-    print("=" * 60)
+        print(f"\n\nRunning baseline analysis (root: {baseline_model})...")
+        print("=" * 60)
 
-    baseline_result = run_baseline(
-        codebase_path=actual_path,
-        verbose=not args.quiet,
-        root_model=baseline_model,
-    )
+        baseline_result = run_baseline(
+            codebase_path=actual_path,
+            verbose=not args.quiet,
+            root_model=baseline_model,
+        )
+    finally:
+        if is_temp:
+            shutil.rmtree(actual_path, ignore_errors=True)
 
     # Save both
     output_dir = Path(args.output_dir)
