@@ -3,8 +3,8 @@
 import pytest
 from unittest.mock import MagicMock
 
-from src.rlm_scaffold import RLMEngine
-from src.llm_clients import TokenUsage
+from deeprepo.rlm_scaffold import RLMEngine
+from deeprepo.llm_clients import TokenUsage
 
 
 @pytest.fixture

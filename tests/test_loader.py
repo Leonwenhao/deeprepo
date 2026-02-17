@@ -1,7 +1,7 @@
 """Step 2: Test codebase loader against tests/test_small/."""
 
 import json
-from src.codebase_loader import load_codebase, format_metadata_for_prompt
+from deeprepo.codebase_loader import load_codebase, format_metadata_for_prompt
 
 TEST_PATH = "tests/test_small"
 

@@ -1,6 +1,6 @@
 """Step 3: Verify prompts are valid and template formats correctly."""
 
-from src.prompts import ROOT_SYSTEM_PROMPT, SUB_SYSTEM_PROMPT, ROOT_USER_PROMPT_TEMPLATE
+from deeprepo.prompts import ROOT_SYSTEM_PROMPT, SUB_SYSTEM_PROMPT, ROOT_USER_PROMPT_TEMPLATE
 
 print("=" * 60)
 print("TEST: Prompts Verification")

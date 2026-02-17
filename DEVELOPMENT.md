@@ -114,7 +114,7 @@ response = await async_client.chat.completions.create(
 
 ### Build Order (do these in sequence)
 
-#### Step 1: `src/llm_clients.py` — API Wrappers
+#### Step 1: `deeprepo/llm_clients.py` — API Wrappers
 
 **Purpose:** Thin wrappers around Anthropic + OpenRouter APIs with token tracking.
 
@@ -142,7 +142,7 @@ response = await async_client.chat.completions.create(
 
 **Test criteria:** Can call both APIs and get text responses. Token counts are tracked.
 
-#### Step 2: `src/codebase_loader.py` — Codebase Loading
+#### Step 2: `deeprepo/codebase_loader.py` — Codebase Loading
 
 **Purpose:** Load a local directory into a structured format for the REPL.
 
@@ -182,7 +182,7 @@ response = await async_client.chat.completions.create(
 
 **Test criteria:** Load `tests/test_small/` → get 3 files, correct tree, metadata.
 
-#### Step 3: `src/prompts.py` — System Prompts
+#### Step 3: `deeprepo/prompts.py` — System Prompts
 
 **Purpose:** Two prompts that drive the RLM behavior.
 
@@ -205,7 +205,7 @@ response = await async_client.chat.completions.create(
 
 **Test criteria:** Prompts are strings, template formats without error.
 
-#### Step 4: `src/rlm_scaffold.py` — The Core Engine
+#### Step 4: `deeprepo/rlm_scaffold.py` — The Core Engine
 
 **Purpose:** The REPL loop that ties everything together. This is the heart of the project.
 
@@ -316,7 +316,7 @@ messages.append({"role": "user", "content": f"REPL Output:\n```\n{output}\n```\n
 
 **Test criteria:** Run against `tests/test_small/` (3 files with planted bugs). The analysis should identify at least: SQL injection, hardcoded secret key, debug mode, MD5 hashing, unclosed DB connections.
 
-#### Step 5: `src/baseline.py` — Single-Model Comparison
+#### Step 5: `deeprepo/baseline.py` — Single-Model Comparison
 
 **Purpose:** Run the same analysis task through a single Opus call (no REPL, no sub-LLMs) for comparison.
 
@@ -330,16 +330,16 @@ messages.append({"role": "user", "content": f"REPL Output:\n```\n{output}\n```\n
 
 **Test criteria:** Run on same test codebase, produces analysis, tracks cost.
 
-#### Step 6: `src/cli.py` — CLI Interface
+#### Step 6: `deeprepo/cli.py` — CLI Interface
 
 **Purpose:** Command-line entry point.
 
 **Commands:**
 ```bash
-python -m src.cli analyze /path/to/repo          # RLM analysis
-python -m src.cli analyze https://github.com/... # Clone + analyze
-python -m src.cli baseline /path/to/repo          # Single-model comparison
-python -m src.cli compare /path/to/repo           # Run both, show metrics side-by-side
+python -m deeprepo.cli analyze /path/to/repo          # RLM analysis
+python -m deeprepo.cli analyze https://github.com/... # Clone + analyze
+python -m deeprepo.cli baseline /path/to/repo          # Single-model comparison
+python -m deeprepo.cli compare /path/to/repo           # Run both, show metrics side-by-side
 ```
 
 **Options:**

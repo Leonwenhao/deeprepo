@@ -1,7 +1,7 @@
 """Step 4: Integration test — run full RLM analysis on tests/test_small/."""
 
 import time
-from src.rlm_scaffold import run_analysis
+from deeprepo.rlm_scaffold import run_analysis
 
 TEST_PATH = "tests/test_small"
 

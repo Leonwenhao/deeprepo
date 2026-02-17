@@ -72,26 +72,26 @@ cp .env.example .env
 
 ### Run
 
-The `deeprepo` entry point may not resolve correctly with editable installs. Use `python -m src.cli` as the reliable invocation method.
+Use `python -m deeprepo.cli` or the `deeprepo` entry point after `pip install -e .`.
 
 ```bash
 # Analyze a GitHub repo
-python -m src.cli analyze https://github.com/tiangolo/fastapi
+python -m deeprepo.cli analyze https://github.com/tiangolo/fastapi
 
 # Analyze a local directory
-python -m src.cli analyze ./my-project
+python -m deeprepo.cli analyze ./my-project
 
 # Run single-model baseline for comparison
-python -m src.cli baseline ./my-project
+python -m deeprepo.cli baseline ./my-project
 
 # Compare RLM vs baseline (split-model: Sonnet RLM vs Opus baseline)
-python -m src.cli compare https://github.com/tiangolo/fastapi --baseline-model opus
+python -m deeprepo.cli compare https://github.com/tiangolo/fastapi --baseline-model opus
 
 # Quiet mode (no progress output)
-python -m src.cli analyze ./my-project -q
+python -m deeprepo.cli analyze ./my-project -q
 
 # Save to specific directory
-python -m src.cli analyze ./my-project -o ./reports
+python -m deeprepo.cli analyze ./my-project -o ./reports
 ```
 
 ### Output
@@ -106,13 +106,13 @@ By default, the tool uses **Claude Sonnet 4.5** (`claude-sonnet-4-5-20250929`) a
 
 ```bash
 # Use Opus for maximum quality (more expensive)
-python -m src.cli analyze ./my-project --root-model opus
+python -m deeprepo.cli analyze ./my-project --root-model opus
 
 # Use a specific model string directly
-python -m src.cli analyze ./my-project --root-model claude-opus-4-6
+python -m deeprepo.cli analyze ./my-project --root-model claude-opus-4-6
 
 # Adjust max REPL turns (default: 15)
-python -m src.cli analyze ./my-project --max-turns 20
+python -m deeprepo.cli analyze ./my-project --max-turns 20
 ```
 
 ### Cost Estimates
@@ -136,7 +136,7 @@ deeprepo/
 ├── README.md
 ├── LICENSE
 ├── .env.example
-├── src/
+├── deeprepo/
 │   ├── __init__.py
 │   ├── llm_clients.py      # Anthropic + OpenRouter API wrappers with token tracking
 │   ├── codebase_loader.py   # Git clone → structured file tree + metadata

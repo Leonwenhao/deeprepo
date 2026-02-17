@@ -1,7 +1,7 @@
 """Step 5: Test baseline single-model analysis on tests/test_small/."""
 
 import time
-from src.baseline import run_baseline
+from deeprepo.baseline import run_baseline
 
 TEST_PATH = "tests/test_small"
 

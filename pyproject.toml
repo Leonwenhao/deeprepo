@@ -15,7 +15,10 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["src*"]
+include = ["deeprepo*"]
 
 [project.scripts]
-deeprepo = "src.cli:main"
+deeprepo = "deeprepo.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
