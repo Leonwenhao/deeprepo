@@ -18,7 +18,13 @@ import time
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
 
-from .llm_clients import RootModelClient, SubModelClient, TokenUsage, create_root_client
+from .llm_clients import (
+    DEFAULT_SUB_MODEL,
+    RootModelClient,
+    SubModelClient,
+    TokenUsage,
+    create_root_client,
+)
 from .codebase_loader import load_codebase, format_metadata_for_prompt
 from .prompts import ROOT_SYSTEM_PROMPT, SUB_SYSTEM_PROMPT, ROOT_USER_PROMPT_TEMPLATE
 
@@ -444,6 +450,7 @@ def run_analysis(
     verbose: bool = True,
     max_turns: int = MAX_TURNS,
     root_model: str = "claude-opus-4-6",
+    sub_model: str = DEFAULT_SUB_MODEL,
 ) -> dict:
     """
     Convenience function to run a full RLM analysis.
@@ -453,6 +460,7 @@ def run_analysis(
         verbose: Print progress to stderr
         max_turns: Maximum REPL iterations
         root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-5-20250929")
+        sub_model: OpenRouter model string for sub-LLM file analysis workers
 
     Returns:
         dict with analysis, turns, usage, trajectory
@@ -483,7 +491,7 @@ def run_analysis(
         usage = TokenUsage()
         usage.set_root_pricing(root_model)
         root_client = create_root_client(usage=usage, model=root_model)
-        sub_client = SubModelClient(usage=usage)
+        sub_client = SubModelClient(usage=usage, model=sub_model)
 
         # Run the engine
         engine = RLMEngine(

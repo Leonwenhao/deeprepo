@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from . import __version__
+from .llm_clients import DEFAULT_SUB_MODEL
 
 # Map short names to model strings
 ROOT_MODEL_MAP = {
@@ -36,6 +37,7 @@ def cmd_analyze(args):
         verbose=not args.quiet,
         max_turns=args.max_turns,
         root_model=root_model,
+        sub_model=args.sub_model,
     )
 
     # Save output
@@ -54,6 +56,7 @@ def cmd_analyze(args):
     metrics = {
         "mode": "rlm",
         "root_model": root_model,
+        "sub_model": args.sub_model,
         "repo": args.path,
         "turns": result["turns"],
         "root_calls": result["usage"].root_calls,
@@ -140,6 +143,7 @@ def cmd_compare(args):
             verbose=not args.quiet,
             max_turns=args.max_turns,
             root_model=rlm_model,
+            sub_model=args.sub_model,
         )
 
         print(f"\n\nRunning baseline analysis (root: {baseline_model})...")
@@ -167,6 +171,7 @@ def cmd_compare(args):
     rlm_metrics = {
         "mode": "rlm",
         "root_model": rlm_model,
+        "sub_model": args.sub_model,
         "repo": args.path,
         "turns": rlm_result["turns"],
         "root_calls": rlm_result["usage"].root_calls,
@@ -224,6 +229,21 @@ def cmd_compare(args):
     print(f"\nOutputs saved to: {output_dir}/")
 
 
+def cmd_list_models(args):
+    """List built-in sub-LLM model pricing options."""
+    from .llm_clients import DEFAULT_SUB_MODEL, SUB_MODEL_PRICING
+
+    print("Available sub-LLM models (for --sub-model flag):\n")
+    print(f"  {'Model':<45} {'Input $/M':>10} {'Output $/M':>11}")
+    print(f"  {'-' * 45} {'-' * 10} {'-' * 11}")
+    for model, pricing in SUB_MODEL_PRICING.items():
+        default_marker = " (default)" if model == DEFAULT_SUB_MODEL else ""
+        print(
+            f"  {model:<45} ${pricing['input']:>8.2f}  ${pricing['output']:>9.2f}{default_marker}"
+        )
+    print("\n  Any OpenRouter model string is accepted. Unknown models use $1.00/$1.00 fallback pricing.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="deeprepo — Deep codebase intelligence powered by recursive multi-model orchestration"
@@ -242,6 +262,11 @@ def main():
         "--root-model",
         default="sonnet",
         help="Root model: opus, sonnet (default), minimax, or a full model string like claude-opus-4-6",
+    )
+    common.add_argument(
+        "--sub-model",
+        default=DEFAULT_SUB_MODEL,
+        help=f"Sub-LLM model for file analysis (default: {DEFAULT_SUB_MODEL}). Any OpenRouter model string.",
     )
 
     # analyze command
@@ -262,6 +287,10 @@ def main():
         help="Root model for baseline side: opus (default), sonnet, or a full model string",
     )
     p_compare.set_defaults(func=cmd_compare)
+
+    # list-models command
+    p_list = subparsers.add_parser("list-models", help="List available sub-LLM models and pricing")
+    p_list.set_defaults(func=cmd_list_models)
 
     args = parser.parse_args()
 

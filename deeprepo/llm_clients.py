@@ -8,11 +8,14 @@ Sub-LLM workers: MiniMax M2.5 via OpenRouter (OpenAI-compatible)
 import os
 import time
 import asyncio
+import sys
 from dataclasses import dataclass, field
 
 import anthropic
 import openai
 from dotenv import load_dotenv
+
+from deeprepo.utils import async_retry_with_backoff, retry_with_backoff
 
 
 # Root model pricing profiles (per million tokens)
@@ -21,6 +24,16 @@ ROOT_MODEL_PRICING = {
     "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0, "label": "Sonnet 4.5"},
     "minimax/minimax-m2.5": {"input": 0.20, "output": 1.10, "label": "MiniMax M2.5"},
 }
+
+SUB_MODEL_PRICING = {
+    "minimax/minimax-m2.5": {"input": 0.20, "output": 1.10},
+    "deepseek/deepseek-chat-v3-0324": {"input": 0.14, "output": 0.28},
+    "qwen/qwen-2.5-coder-32b-instruct": {"input": 0.20, "output": 0.20},
+    "meta-llama/llama-3.3-70b-instruct": {"input": 0.39, "output": 0.39},
+    "google/gemini-2.0-flash-001": {"input": 0.10, "output": 0.40},
+}
+
+DEFAULT_SUB_MODEL = "minimax/minimax-m2.5"
 
 
 @dataclass
@@ -40,9 +53,10 @@ class TokenUsage:
     root_output_price: float = 75.0
     root_model_label: str = "Opus 4.6"
 
-    # Sub-LLM pricing (fixed — MiniMax M2.5 via OpenRouter)
-    SUB_INPUT_PRICE = 0.20
-    SUB_OUTPUT_PRICE = 1.10
+    # Sub-LLM pricing — set per model via set_sub_pricing()
+    sub_input_price: float = 0.20
+    sub_output_price: float = 1.10
+    sub_model_label: str = "MiniMax M2.5"
 
     def set_root_pricing(self, model: str) -> None:
         """Configure root pricing from a model string."""
@@ -50,6 +64,21 @@ class TokenUsage:
         self.root_input_price = pricing["input"]
         self.root_output_price = pricing["output"]
         self.root_model_label = pricing["label"]
+
+    def set_sub_pricing(self, model: str) -> None:
+        """Configure sub-LLM pricing from a model string."""
+        pricing = SUB_MODEL_PRICING.get(model)
+        self.sub_model_label = model.split("/")[-1] if "/" in model else model
+        if pricing:
+            self.sub_input_price = pricing["input"]
+            self.sub_output_price = pricing["output"]
+        else:
+            self.sub_input_price = 1.00
+            self.sub_output_price = 1.00
+            print(
+                f"Warning: Unknown sub-model '{model}' — using fallback pricing $1.00/$1.00 per M tokens",
+                file=sys.stderr,
+            )
 
     @property
     def root_cost(self) -> float:
@@ -61,8 +90,8 @@ class TokenUsage:
     @property
     def sub_cost(self) -> float:
         return (
-            (self.sub_input_tokens / 1_000_000) * self.SUB_INPUT_PRICE
-            + (self.sub_output_tokens / 1_000_000) * self.SUB_OUTPUT_PRICE
+            (self.sub_input_tokens / 1_000_000) * self.sub_input_price
+            + (self.sub_output_tokens / 1_000_000) * self.sub_output_price
         )
 
     @property
@@ -75,7 +104,7 @@ class TokenUsage:
             f"Root ({self.root_model_label}): {self.root_calls} calls, "
             f"{self.root_input_tokens:,} in / {self.root_output_tokens:,} out, "
             f"${self.root_cost:.4f}\n"
-            f"Sub (M2.5): {self.sub_calls} calls, "
+            f"Sub ({self.sub_model_label}): {self.sub_calls} calls, "
             f"{self.sub_input_tokens:,} in / {self.sub_output_tokens:,} out, "
             f"${self.sub_cost:.4f}\n"
             f"Total cost: ${self.total_cost:.4f}"
@@ -115,14 +144,14 @@ class RootModelClient:
         if system:
             kwargs["system"] = system
 
+        @retry_with_backoff()
+        def _call():
+            return self.client.messages.create(**kwargs)
+
         try:
-            response = self.client.messages.create(**kwargs)
-        except anthropic.APITimeoutError:
-            raise RuntimeError(f"Anthropic API timeout on {self.model}. Try again or check your network.")
-        except anthropic.RateLimitError:
-            raise RuntimeError(f"Anthropic rate limit exceeded for {self.model}. Wait a moment and retry.")
-        except anthropic.APIError as e:
-            raise RuntimeError(f"Anthropic API error on {self.model}: {e}")
+            response = _call()
+        except Exception as e:
+            raise RuntimeError(f"Anthropic API error on {self.model} after retries: {e}") from e
 
         latency_ms = (time.time() - t0) * 1000
         self.usage.root_calls += 1
@@ -170,19 +199,19 @@ class OpenRouterRootClient:
             api_messages.append({"role": "system", "content": system})
         api_messages.extend(messages)
 
-        try:
-            response = self.client.chat.completions.create(
+        @retry_with_backoff()
+        def _call():
+            return self.client.chat.completions.create(
                 model=self.model,
                 messages=api_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-        except openai.APITimeoutError:
-            raise RuntimeError(f"OpenRouter API timeout on {self.model}. Try again or check your network.")
-        except openai.RateLimitError:
-            raise RuntimeError(f"OpenRouter rate limit exceeded for {self.model}. Wait a moment and retry.")
-        except openai.APIError as e:
-            raise RuntimeError(f"OpenRouter API error on {self.model}: {e}")
+
+        try:
+            response = _call()
+        except Exception as e:
+            raise RuntimeError(f"OpenRouter API error on {self.model} after retries: {e}") from e
 
         latency_ms = (time.time() - t0) * 1000
         self.usage.root_calls += 1
@@ -211,7 +240,7 @@ class SubModelClient:
     def __init__(
         self,
         usage: TokenUsage,
-        model: str = "minimax/minimax-m2.5",
+        model: str = DEFAULT_SUB_MODEL,
         base_url: str = "https://openrouter.ai/api/v1",
     ):
         load_dotenv()
@@ -224,6 +253,7 @@ class SubModelClient:
         self.async_client = openai.AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model = model
         self.usage = usage
+        self.usage.set_sub_pricing(model)
         self._lock = asyncio.Lock()
 
     def query(self, prompt: str, system: str = "", max_tokens: int = 4096) -> str:
@@ -234,19 +264,19 @@ class SubModelClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        try:
-            response = self.client.chat.completions.create(
+        @retry_with_backoff()
+        def _call():
+            return self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
-        except openai.APITimeoutError:
-            raise RuntimeError(f"Sub-LLM API timeout on {self.model}.")
-        except openai.RateLimitError:
-            raise RuntimeError(f"Sub-LLM rate limit exceeded for {self.model}.")
-        except openai.APIError as e:
-            raise RuntimeError(f"Sub-LLM API error on {self.model}: {e}")
+
+        try:
+            response = _call()
+        except Exception as e:
+            raise RuntimeError(f"Sub-LLM API error on {self.model} after retries: {e}") from e
 
         latency_ms = (time.time() - t0) * 1000
         self.usage.sub_calls += 1
@@ -257,7 +287,13 @@ class SubModelClient:
 
         return response.choices[0].message.content or ""
 
-    async def _async_query(self, prompt: str, system: str = "", max_tokens: int = 4096) -> str:
+    async def _async_query(
+        self,
+        prompt: str,
+        system: str = "",
+        max_tokens: int = 4096,
+        lock: asyncio.Lock | None = None,
+    ) -> str:
         """Async single query for use in batch."""
         t0 = time.time()
         messages = []
@@ -266,21 +302,19 @@ class SubModelClient:
         messages.append({"role": "user", "content": prompt})
 
         try:
-            response = await self.async_client.chat.completions.create(
+            response = await async_retry_with_backoff(
+                self.async_client.chat.completions.create,
                 model=self.model,
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
-        except openai.APITimeoutError:
-            raise RuntimeError(f"Sub-LLM API timeout on {self.model}.")
-        except openai.RateLimitError:
-            raise RuntimeError(f"Sub-LLM rate limit exceeded for {self.model}.")
-        except openai.APIError as e:
-            raise RuntimeError(f"Sub-LLM API error on {self.model}: {e}")
+        except Exception as e:
+            raise RuntimeError(f"Sub-LLM API error on {self.model} after retries: {e}") from e
 
         latency_ms = (time.time() - t0) * 1000
-        async with self._lock:
+        usage_lock = lock or self._lock
+        async with usage_lock:
             self.usage.sub_calls += 1
             if response.usage:
                 self.usage.sub_input_tokens += response.usage.prompt_tokens or 0
@@ -301,16 +335,35 @@ class SubModelClient:
         Sends multiple prompts concurrently to the sub-LLM.
         """
         async def _run_batch():
+            lock = asyncio.Lock()
             semaphore = asyncio.Semaphore(max_concurrent)
 
             async def _limited_query(prompt: str) -> str:
                 async with semaphore:
-                    return await self._async_query(prompt, system=system, max_tokens=max_tokens)
+                    return await self._async_query(
+                        prompt,
+                        system=system,
+                        max_tokens=max_tokens,
+                        lock=lock,
+                    )
 
             tasks = [_limited_query(p) for p in prompts]
             return await asyncio.gather(*tasks, return_exceptions=True)
 
-        results = asyncio.run(_run_batch())
+        # Detect if we're already in an async context (Jupyter/FastAPI/etc.).
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is None:
+            results = asyncio.run(_run_batch())
+        else:
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(asyncio.run, _run_batch())
+                results = future.result()
 
         # Convert exceptions to error strings
         processed = []

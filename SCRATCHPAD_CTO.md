@@ -1,0 +1,290 @@
+# CTO Scratchpad — deeprepo Infrastructure Sprint
+
+## Current Sprint Status
+- **Last Updated:** 2026-02-18 (Issue #7 reviewed, Issue #6 task sent)
+- **Current Issue:** #6 — Replace Code Parser with tool_use
+- **Phase:** TASK_SENT
+- **Issues Completed:** #4, #5, #7
+- **Issues Remaining:** #6, #15, #14
+
+## Codebase Notes (verified against actual code)
+- Package is `deeprepo/` (renamed from `src/` in 431b2cb)
+- `deeprepo/utils.py` — retry utilities (Issue #4)
+- `deeprepo/llm_clients.py` — retry on all 4 API calls (Issue #4), event-loop-safe batch (Issue #5), dynamic sub-pricing (Issue #7)
+- `SUB_MODEL_PRICING` dict + `DEFAULT_SUB_MODEL` constant in llm_clients.py
+- `TokenUsage.set_sub_pricing(model)` — dynamic pricing, mirrors `set_root_pricing()`
+- `SubModelClient.__init__` defaults to `DEFAULT_SUB_MODEL`, calls `set_sub_pricing()`
+- `run_analysis()` accepts `sub_model` param, threads to `SubModelClient`
+- CLI `common` argparse group has `--root-model` and `--sub-model`; `list-models` subcommand works
+- `run_baseline()` does NOT use SubModelClient — no sub-LLM changes needed there
+- `RootModelClient.complete()` currently returns `str` — Issue #6 will change this to return full response when `tools` provided
+- `_extract_code()` in rlm_scaffold.py: ~130 lines of fragile regex — Issue #6 adds tool_use as primary path, keeps this as fallback
+
+---
+
+## Review: Issue #5 — asyncio.run() Fix — APPROVED
+
+**Reviewed:** 2026-02-18
+**Verdict:** APPROVED — clean, correct implementation.
+
+**What I verified:**
+- `batch()` now detects running event loop via `asyncio.get_running_loop()`, falls back to `ThreadPoolExecutor(max_workers=1)` with `asyncio.run()` in the thread. Correct.
+- Fresh `asyncio.Lock()` created inside `_run_batch()` and passed via `lock=` parameter to `_async_query`. Cross-loop issue properly handled.
+- `_async_query` accepts optional `lock` param, uses `usage_lock = lock or self._lock`. Clean.
+- Public API unchanged, semaphore + `return_exceptions=True` preserved, exception processing intact.
+- Tests: 2 new tests — sync context guard + existing event loop scenario with fully mocked async client.
+- **Test results:** 15/15 pass (9 extract + 4 retry + 2 async batch).
+
+---
+
+## Review: Issue #4 — Retry Logic — APPROVED
+
+**Reviewed:** 2026-02-18
+**Verdict:** APPROVED. See earlier notes.
+
+---
+
+## Review: Issue #7 — Configurable Sub-LLM Model — APPROVED
+
+**Reviewed:** 2026-02-18
+**Verdict:** APPROVED — clean, spec-compliant implementation.
+
+**What I verified:**
+- `SUB_MODEL_PRICING` dict with 5 models + `DEFAULT_SUB_MODEL` constant (llm_clients.py:28-36)
+- `TokenUsage` instance fields replace class constants. `set_sub_pricing(model)` mirrors `set_root_pricing()` pattern (llm_clients.py:56-81)
+- `summary()` uses dynamic `self.sub_model_label` (llm_clients.py:107)
+- Unknown model fallback: $1.00/$1.00 + warning to stderr — verified with smoke test
+- `SubModelClient.__init__` defaults to `DEFAULT_SUB_MODEL`, calls `self.usage.set_sub_pricing(model)` (llm_clients.py:243-256)
+- `run_analysis()` accepts `sub_model` param, threads to `SubModelClient(usage=usage, model=sub_model)` (rlm_scaffold.py:448-494)
+- CLI: `--sub-model` on common arg group (analyze/baseline/compare), `list-models` subcommand works (cli.py:266-293)
+- `cmd_analyze` and `cmd_compare` pass `sub_model=args.sub_model` to `run_analysis()`; baseline ignores it
+- **Deviation (acceptable):** `sub_model` added to saved metrics JSON — additive metadata only
+- **Test results:** 15/15 pass. `list-models`, `analyze --help`, `compare --help`, `baseline --help` all show `--sub-model`.
+
+---
+
+## Codex Task: #7 — Configurable Sub-LLM Model (--sub-model)
+
+### Context
+The sub-LLM model is hardcoded to `minimax/minimax-m2.5`. Users cannot swap to DeepSeek, Llama, Qwen, or other OpenRouter models without editing source code. Model-agnostic orchestration is the core pitch — hardcoding a single sub-LLM undermines this.
+
+### Files to Modify
+- `deeprepo/llm_clients.py` — add `SUB_MODEL_PRICING` dict, update `TokenUsage` for dynamic sub-pricing, update `SubModelClient.__init__`
+- `deeprepo/cli.py` — add `--sub-model` flag and `--list-models` command
+- `deeprepo/rlm_scaffold.py` — thread `sub_model` through `run_analysis()`
+- (No changes to `deeprepo/baseline.py` — baseline doesn't use sub-LLM)
+
+### Specification
+
+**1. Add `SUB_MODEL_PRICING` dict to `deeprepo/llm_clients.py` (near line 18, after ROOT_MODEL_PRICING):**
+
+```python
+SUB_MODEL_PRICING = {
+    "minimax/minimax-m2.5": {"input": 0.20, "output": 1.10},
+    "deepseek/deepseek-chat-v3-0324": {"input": 0.14, "output": 0.28},
+    "qwen/qwen-2.5-coder-32b-instruct": {"input": 0.20, "output": 0.20},
+    "meta-llama/llama-3.3-70b-instruct": {"input": 0.39, "output": 0.39},
+    "google/gemini-2.0-flash-001": {"input": 0.10, "output": 0.40},
+}
+
+DEFAULT_SUB_MODEL = "minimax/minimax-m2.5"
+```
+
+**2. Update `TokenUsage` (lines 26-84) to support dynamic sub-pricing:**
+
+Currently `SUB_INPUT_PRICE = 0.20` and `SUB_OUTPUT_PRICE = 1.10` are class-level constants. Change them to instance fields and add a `set_sub_pricing()` method, mirroring the existing `set_root_pricing()`:
+
+```python
+@dataclass
+class TokenUsage:
+    # ... existing fields ...
+
+    # Sub-LLM pricing — set per model via set_sub_pricing()
+    sub_input_price: float = 0.20
+    sub_output_price: float = 1.10
+    sub_model_label: str = "MiniMax M2.5"
+
+    def set_sub_pricing(self, model: str) -> None:
+        """Configure sub-LLM pricing from a model string."""
+        pricing = SUB_MODEL_PRICING.get(model)
+        if pricing:
+            self.sub_input_price = pricing["input"]
+            self.sub_output_price = pricing["output"]
+            self.sub_model_label = model.split("/")[-1] if "/" in model else model
+        else:
+            # Unknown model — use fallback pricing and warn
+            self.sub_input_price = 1.00
+            self.sub_output_price = 1.00
+            self.sub_model_label = model.split("/")[-1] if "/" in model else model
+            print(f"⚠️ Unknown sub-model '{model}' — using fallback pricing $1.00/$1.00 per M tokens", file=sys.stderr)
+```
+
+**Remove** the old class constants `SUB_INPUT_PRICE = 0.20` and `SUB_OUTPUT_PRICE = 1.10`.
+
+**Update** `sub_cost` property and `summary()` to use the new instance fields:
+```python
+@property
+def sub_cost(self) -> float:
+    return (
+        (self.sub_input_tokens / 1_000_000) * self.sub_input_price
+        + (self.sub_output_tokens / 1_000_000) * self.sub_output_price
+    )
+
+def summary(self) -> str:
+    return (
+        f"=== Token Usage & Cost ===\n"
+        f"Root ({self.root_model_label}): {self.root_calls} calls, "
+        f"{self.root_input_tokens:,} in / {self.root_output_tokens:,} out, "
+        f"${self.root_cost:.4f}\n"
+        f"Sub ({self.sub_model_label}): {self.sub_calls} calls, "
+        f"{self.sub_input_tokens:,} in / {self.sub_output_tokens:,} out, "
+        f"${self.sub_cost:.4f}\n"
+        f"Total cost: ${self.total_cost:.4f}"
+    )
+```
+
+Note: `summary()` currently hardcodes `"Sub (M2.5)"` — update it to use `self.sub_model_label`. You'll need to add `import sys` at the top of `llm_clients.py` for the stderr warning.
+
+**3. Update `SubModelClient.__init__` to call `set_sub_pricing`:**
+
+The constructor already accepts `model` — just add a call to set pricing on the usage tracker:
+
+```python
+def __init__(self, usage: TokenUsage, model: str = DEFAULT_SUB_MODEL, ...):
+    ...
+    self.usage = usage
+    self.usage.set_sub_pricing(model)  # <-- add this line
+```
+
+Use `DEFAULT_SUB_MODEL` constant instead of the hardcoded string.
+
+**4. Update `run_analysis()` in `deeprepo/rlm_scaffold.py` (line 442):**
+
+Add `sub_model` parameter and thread it to `SubModelClient`:
+
+```python
+def run_analysis(
+    codebase_path: str,
+    verbose: bool = True,
+    max_turns: int = MAX_TURNS,
+    root_model: str = "claude-opus-4-6",
+    sub_model: str = "minimax/minimax-m2.5",  # <-- add this
+) -> dict:
+    ...
+    sub_client = SubModelClient(usage=usage, model=sub_model)  # <-- pass sub_model
+```
+
+Import `DEFAULT_SUB_MODEL` from llm_clients and use it as the default instead of the hardcoded string.
+
+**5. Update CLI (`deeprepo/cli.py`):**
+
+**a) Add `--sub-model` to the `common` argument group (after `--root-model`, around line 245):**
+
+```python
+common.add_argument(
+    "--sub-model",
+    default="minimax/minimax-m2.5",
+    help="Sub-LLM model for file analysis (default: minimax/minimax-m2.5). Any OpenRouter model string.",
+)
+```
+
+Import `DEFAULT_SUB_MODEL` from llm_clients and use it as the default.
+
+**b) Thread `sub_model` through cmd_analyze (line 28):**
+
+```python
+def cmd_analyze(args):
+    ...
+    result = run_analysis(
+        codebase_path=args.path,
+        verbose=not args.quiet,
+        max_turns=args.max_turns,
+        root_model=root_model,
+        sub_model=args.sub_model,  # <-- add
+    )
+```
+
+**c) Thread `sub_model` through cmd_compare (line 116):**
+
+```python
+rlm_result = run_analysis(
+    codebase_path=actual_path,
+    verbose=not args.quiet,
+    max_turns=args.max_turns,
+    root_model=rlm_model,
+    sub_model=args.sub_model,  # <-- add
+)
+```
+
+**d) `cmd_baseline` does NOT use sub-LLM** — just ignore the `--sub-model` arg (it'll be present on `args` but unused). No changes needed.
+
+**e) Add `--list-models` command:**
+
+Add a new subcommand `list-models` (or handle it as a top-level flag) that prints available sub-models with pricing:
+
+```python
+def cmd_list_models(args):
+    """Print available sub-LLM models and pricing."""
+    from .llm_clients import SUB_MODEL_PRICING, DEFAULT_SUB_MODEL
+    print("Available sub-LLM models (for --sub-model flag):\n")
+    print(f"  {'Model':<45} {'Input $/M':>10} {'Output $/M':>11}")
+    print(f"  {'-'*45} {'-'*10} {'-'*11}")
+    for model, pricing in SUB_MODEL_PRICING.items():
+        default_marker = " (default)" if model == DEFAULT_SUB_MODEL else ""
+        print(f"  {model:<45} ${pricing['input']:>8.2f}  ${pricing['output']:>9.2f}{default_marker}")
+    print(f"\n  Any OpenRouter model string is accepted. Unknown models use $1.00/$1.00 fallback pricing.")
+```
+
+Register it as a subparser:
+```python
+p_list = subparsers.add_parser("list-models", help="List available sub-LLM models and pricing")
+p_list.set_defaults(func=cmd_list_models)
+```
+
+Note: `list-models` doesn't need the `common` parent parser (no `path` argument needed).
+
+### Acceptance Criteria
+- [ ] `SUB_MODEL_PRICING` dict and `DEFAULT_SUB_MODEL` constant in `deeprepo/llm_clients.py`
+- [ ] `TokenUsage` uses dynamic sub-pricing via `set_sub_pricing(model)`, no more class constants
+- [ ] `TokenUsage.summary()` shows dynamic sub-model label instead of hardcoded "M2.5"
+- [ ] `--sub-model` flag available on `analyze`, `baseline`, and `compare` commands (present on args even if baseline ignores it)
+- [ ] Default behavior unchanged when no `--sub-model` provided (uses minimax/minimax-m2.5)
+- [ ] Unknown models accepted with warning and $1.00/$1.00 fallback pricing
+- [ ] `deeprepo list-models` prints available models and pricing
+- [ ] `run_analysis()` accepts and threads `sub_model` parameter
+- [ ] Existing tests pass: `uv run python -m pytest tests/test_extract_code.py tests/test_retry.py tests/test_async_batch.py -v`
+- [ ] `uv run python -m deeprepo.cli list-models` works
+- [ ] `uv run python -m deeprepo.cli analyze --help` shows `--sub-model`
+
+### Anti-Patterns (Do NOT)
+- Do NOT add model aliases for sub-models (unlike root models which have `sonnet`/`opus` aliases)
+- Do NOT validate that the model exists on OpenRouter — just pass it through, let the API error
+- Do NOT change the default sub-model from minimax/minimax-m2.5
+- Do NOT modify `deeprepo/baseline.py` — baseline doesn't use sub-LLM
+- Do NOT change any public API beyond adding the new optional parameters
+
+### Test Commands
+```bash
+uv run python -m pytest tests/test_extract_code.py tests/test_retry.py tests/test_async_batch.py -v
+uv run python -m deeprepo.cli list-models
+uv run python -m deeprepo.cli analyze --help   # should show --sub-model
+uv run python -m deeprepo.cli compare --help   # should show --sub-model
+```
+
+### When Done
+Update SCRATCHPAD_CODEX.md with:
+- What you implemented (files changed, approach taken)
+- Any deviations from the spec and why
+- Test results (paste output)
+
+---
+
+## Decisions Made This Sprint
+- **Path correction:** Package is `deeprepo/` not `src/`.
+- **Issue #4 (retry):** APPROVED. Clean `_is_retryable` + decorator approach.
+- **Issue #5 (asyncio):** APPROVED. ThreadPoolExecutor fallback + per-loop lock.
+- **Issue #7 (sub-model):** APPROVED. Dynamic sub-pricing, CLI flag on common args, `list-models` subcommand.
+- **Issue #6 (tool_use) design:** `complete()` returns str without tools (backward compat for baseline), full response object with tools. `_extract_code_from_response()` handles both Anthropic and OpenAI response formats. Legacy `_extract_code()` kept as fallback. Anthropic tool_result format for Anthropic clients, OpenAI `role=tool` format for OpenRouter clients. System prompt updated to prefer tool_use but keeps markdown code block examples as fallback guidance.
+
+## Open Questions
+- (none)
