@@ -1,11 +1,11 @@
 # CTO Scratchpad — deeprepo Infrastructure Sprint
 
 ## Current Sprint Status
-- **Last Updated:** 2026-02-18 (Issue #15 reviewed and APPROVED)
-- **Current Issue:** #14 — Content-Hash Caching for Sub-LLM
-- **Phase:** PLANNING (producing Codex task prompt)
-- **Issues Completed:** #4, #5, #7, #6, #15
-- **Issues Remaining:** #14
+- **Last Updated:** 2026-02-18 (Issue #14 reviewed and APPROVED — SPRINT COMPLETE)
+- **Current Issue:** None — all 6 issues completed
+- **Phase:** DONE
+- **Issues Completed:** #4, #5, #7, #6, #15, #14
+- **Issues Remaining:** None
 
 ## Codebase Notes (verified against actual code)
 - Package is `deeprepo/` (renamed from `src/` in 431b2cb)
@@ -26,6 +26,11 @@
 - `RootModelClient.complete()` accepts `stream: bool = False` — uses `messages.stream()` + `get_final_message()` (Issue #15)
 - `OpenRouterRootClient.complete()` accepts `stream: bool = False` — signature only, intentionally ignored (Issue #15)
 - `analyze()` passes `stream=self.verbose` — quiet mode disables streaming (Issue #15)
+- `deeprepo/cache.py` — content-hash caching for sub-LLM results (Issue #14)
+- `SubModelClient` accepts `use_cache: bool = True`, checks/writes cache in `query()` and `batch()`
+- `batch()` pre-filters cached prompts, sends only uncached to API, merges in original order
+- `run_analysis()` accepts `use_cache`, threads to `SubModelClient`
+- CLI: `--no-cache` flag on common args, `cache stats` and `cache clear` subcommands
 
 ---
 
@@ -90,6 +95,26 @@
 - `cmd_analyze` and `cmd_compare` pass `sub_model=args.sub_model` to `run_analysis()`; baseline ignores it
 - **Deviation (acceptable):** `sub_model` added to saved metrics JSON — additive metadata only
 - **Test results:** 15/15 pass. `list-models`, `analyze --help`, `compare --help`, `baseline --help` all show `--sub-model`.
+
+---
+
+## Review: Issue #14 — Content-Hash Caching for Sub-LLM — APPROVED
+
+**Reviewed:** 2026-02-18
+**Verdict:** APPROVED — clean, spec-compliant, one acceptable deviation.
+
+**What I verified:**
+- `deeprepo/cache.py` (new): `_cache_key()` uses SHA-256 over `model||system||prompt`. `get_cached()` checks expiry (7-day) and deletes expired files. `set_cached()` writes JSON. `clear_cache()` returns count. `cache_stats()` returns entries + size. OSError fail-safes throughout (acceptable deviation for restricted envs).
+- `SubModelClient.__init__`: `use_cache: bool = True` param added, stored as `self.use_cache`.
+- `SubModelClient.query()`: lazy-import cache check before API call, cache write after success, skips `[ERROR` results.
+- `SubModelClient.batch()`: pre-filters all prompts against cache, builds `uncached_indices`, sends only uncached to existing async pipeline, merges results at correct indices, writes to cache. Existing semaphore/event-loop logic preserved.
+- `run_analysis()`: `use_cache: bool = True` threaded to `SubModelClient(use_cache=use_cache)`.
+- CLI: `--no-cache` on common args (analyze/baseline/compare). `cmd_cache` handles `stats` and `clear` sub-actions. `cache` subcommand registered without `common` parent.
+- Tests: 6 tests — miss, hit, model key, expiry, clear, stats. `autouse` fixture monkeypatches `CACHE_DIR` to temp dir.
+- No changes to baseline.py or prompts.py.
+- **Deviation (acceptable):** OSError fail-safes in `set_cached`, `clear_cache`, `cache_stats` — additive robustness for restricted environments.
+- **Test results:** 24/24 pass (9 extract + 4 retry + 2 async batch + 3 tool_use + 6 cache).
+- CLI verified: `cache stats`, `cache clear`, `analyze --help`, `compare --help` all show correct output.
 
 ---
 
@@ -332,6 +357,10 @@ Update SCRATCHPAD_CODEX.md with:
 - **Issue #7 (sub-model):** APPROVED. Dynamic sub-pricing, CLI flag on common args, `list-models` subcommand.
 - **Issue #6 (tool_use):** APPROVED. `complete()` returns str without tools, full response with tools. Dual-format extraction (Anthropic + OpenAI). Legacy parser as fallback. System prompt prefers tool_use.
 - **Issue #15 (streaming):** APPROVED. `stream: bool = False` on both root clients. Anthropic path uses `messages.stream()` + `get_final_message()`. OpenRouter accepts but ignores. `analyze()` passes `stream=self.verbose`.
+- **Issue #14 (caching):** APPROVED. Content-hash caching in `deeprepo/cache.py`. `SubModelClient` pre-filters batch, caches query results. `--no-cache` CLI flag. `cache stats/clear` subcommands. OSError fail-safes acceptable.
+
+## Sprint Summary
+All 6 issues implemented and reviewed: #4 (retry) -> #5 (asyncio) -> #7 (sub-model) -> #6 (tool_use) -> #15 (streaming) -> #14 (caching). Total: 24 tests, all passing. Infrastructure sprint COMPLETE.
 
 ## Open Questions
 - (none)

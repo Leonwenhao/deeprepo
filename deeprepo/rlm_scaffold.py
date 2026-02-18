@@ -653,6 +653,7 @@ def run_analysis(
     max_turns: int = MAX_TURNS,
     root_model: str = "claude-opus-4-6",
     sub_model: str = DEFAULT_SUB_MODEL,
+    use_cache: bool = True,
 ) -> dict:
     """
     Convenience function to run a full RLM analysis.
@@ -663,6 +664,7 @@ def run_analysis(
         max_turns: Maximum REPL iterations
         root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-5-20250929")
         sub_model: OpenRouter model string for sub-LLM file analysis workers
+        use_cache: Enable sub-LLM response cache for repeated prompts
 
     Returns:
         dict with analysis, turns, usage, trajectory
@@ -693,7 +695,7 @@ def run_analysis(
         usage = TokenUsage()
         usage.set_root_pricing(root_model)
         root_client = create_root_client(usage=usage, model=root_model)
-        sub_client = SubModelClient(usage=usage, model=sub_model)
+        sub_client = SubModelClient(usage=usage, model=sub_model, use_cache=use_cache)
 
         # Run the engine
         engine = RLMEngine(

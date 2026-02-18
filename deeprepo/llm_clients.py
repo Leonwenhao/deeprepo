@@ -293,6 +293,7 @@ class SubModelClient:
         usage: TokenUsage,
         model: str = DEFAULT_SUB_MODEL,
         base_url: str = "https://openrouter.ai/api/v1",
+        use_cache: bool = True,
     ):
         load_dotenv()
         api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -305,10 +306,19 @@ class SubModelClient:
         self.model = model
         self.usage = usage
         self.usage.set_sub_pricing(model)
+        self.use_cache = use_cache
         self._lock = asyncio.Lock()
 
     def query(self, prompt: str, system: str = "", max_tokens: int = 4096) -> str:
         """Synchronous single query to the sub-LLM."""
+        # Check cache first
+        if self.use_cache:
+            from deeprepo.cache import get_cached
+
+            cached = get_cached(prompt, system, self.model)
+            if cached is not None:
+                return cached
+
         t0 = time.time()
         messages = []
         if system:
@@ -336,7 +346,15 @@ class SubModelClient:
             self.usage.sub_output_tokens += response.usage.completion_tokens or 0
         self.usage.sub_latency_ms.append(latency_ms)
 
-        return response.choices[0].message.content or ""
+        result = response.choices[0].message.content or ""
+
+        # Write to cache (don't cache errors)
+        if self.use_cache and not result.startswith("[ERROR"):
+            from deeprepo.cache import set_cached
+
+            set_cached(prompt, system, self.model, result)
+
+        return result
 
     async def _async_query(
         self,
@@ -385,6 +403,30 @@ class SubModelClient:
         Parallel batch query — the key RLM advantage.
         Sends multiple prompts concurrently to the sub-LLM.
         """
+        # Pre-check cache for all prompts
+        merged_results: list[str | None] = [None] * len(prompts)
+        uncached_indices: list[int] = []
+
+        if self.use_cache:
+            from deeprepo.cache import get_cached
+
+            for i, prompt in enumerate(prompts):
+                cached = get_cached(prompt, system, self.model)
+                if cached is not None:
+                    merged_results[i] = cached
+                else:
+                    uncached_indices.append(i)
+        else:
+            uncached_indices = list(range(len(prompts)))
+
+        # If all cached, return immediately
+        if not uncached_indices:
+            assert all(r is not None for r in merged_results)
+            return [r for r in merged_results if r is not None]
+
+        # Send only uncached prompts to API
+        uncached_prompts = [prompts[i] for i in uncached_indices]
+
         async def _run_batch():
             lock = asyncio.Lock()
             semaphore = asyncio.Semaphore(max_concurrent)
@@ -398,7 +440,7 @@ class SubModelClient:
                         lock=lock,
                     )
 
-            tasks = [_limited_query(p) for p in prompts]
+            tasks = [_limited_query(p) for p in uncached_prompts]
             return await asyncio.gather(*tasks, return_exceptions=True)
 
         # Detect if we're already in an async context (Jupyter/FastAPI/etc.).
@@ -408,19 +450,33 @@ class SubModelClient:
             loop = None
 
         if loop is None:
-            results = asyncio.run(_run_batch())
+            api_results = asyncio.run(_run_batch())
         else:
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
                 future = executor.submit(asyncio.run, _run_batch())
-                results = future.result()
+                api_results = future.result()
 
         # Convert exceptions to error strings
         processed = []
-        for r in results:
+        for r in api_results:
             if isinstance(r, Exception):
                 processed.append(f"[ERROR: {type(r).__name__}: {r}]")
             else:
                 processed.append(r)
-        return processed
+
+        # Merge API results back + write to cache
+        if self.use_cache:
+            from deeprepo.cache import set_cached
+
+            for idx, api_result in zip(uncached_indices, processed):
+                merged_results[idx] = api_result
+                if not api_result.startswith("[ERROR"):
+                    set_cached(prompts[idx], system, self.model, api_result)
+        else:
+            for idx, api_result in zip(uncached_indices, processed):
+                merged_results[idx] = api_result
+
+        assert all(r is not None for r in merged_results)
+        return [r for r in merged_results if r is not None]

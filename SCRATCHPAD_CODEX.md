@@ -2,10 +2,146 @@
 
 ## Current Status
 - **Last Updated:** 2026-02-18
-- **Current Task:** #15 — Streaming Support for Root Model Responses
+- **Current Task:** #14 — Content-Hash Caching for Sub-LLM Results
 - **Status:** COMPLETED
 
 ## Latest Handoff
+### Task #14 — Content-Hash Caching for Sub-LLM Results
+
+Implemented content-hash caching for sub-LLM responses (query + batch), threaded cache control through RLM runtime and CLI, and added cache management commands/tests.
+
+- Files changed:
+  - `deeprepo/cache.py` (new)
+  - `deeprepo/llm_clients.py` (updated)
+  - `deeprepo/rlm_scaffold.py` (updated)
+  - `deeprepo/cli.py` (updated)
+  - `tests/test_cache.py` (new)
+
+- Approach taken:
+  - `deeprepo/cache.py` (new):
+    - Added:
+      - `CACHE_DIR = ~/.cache/deeprepo`
+      - `CACHE_EXPIRY_DAYS = 7`
+      - `_cache_key(prompt, system, model)` using SHA-256 over `model||system||prompt`
+      - `get_cached(...)` with 7-day expiry and expired-file deletion
+      - `set_cached(...)`
+      - `clear_cache()`
+      - `cache_stats()`
+    - Cache storage format is JSON per hash key.
+  - `deeprepo/llm_clients.py`:
+    - `SubModelClient.__init__(...)`:
+      - Added `use_cache: bool = True` and stored `self.use_cache`.
+    - `SubModelClient.query(...)`:
+      - Added lazy cache lookup before API call (`get_cached`).
+      - Added lazy cache write after successful response (`set_cached`), skipping results that start with `[ERROR`.
+      - No module-level import of `deeprepo.cache` (lazy imports only).
+    - `SubModelClient.batch(...)`:
+      - Added cache pre-filter pass for all prompts.
+      - Sends only uncached prompts to existing async batch pipeline.
+      - Keeps existing semaphore/event-loop detection/exception-to-string handling.
+      - Merges processed API results back into original prompt order.
+      - Writes uncached successful results to cache (skips `[ERROR`).
+      - Returns fully ordered results list.
+  - `deeprepo/rlm_scaffold.py`:
+    - `run_analysis(...)`:
+      - Added `use_cache: bool = True`.
+      - Threaded through to `SubModelClient(..., use_cache=use_cache)`.
+  - `deeprepo/cli.py`:
+    - Added `--no-cache` to common args (so it appears on analyze/baseline/compare).
+    - Threaded `use_cache=not args.no_cache` in:
+      - `cmd_analyze`
+      - `cmd_compare`
+    - Added `cache` command with subcommands:
+      - `deeprepo cache stats`
+      - `deeprepo cache clear`
+  - `tests/test_cache.py` (new):
+    - Added 6 tests:
+      - miss returns `None`
+      - hit after set
+      - model affects key
+      - expiry behavior + file deletion
+      - clear behavior
+      - stats behavior
+    - Uses autouse fixture to monkeypatch `CACHE_DIR` to temp directory.
+
+- Deviations from spec and why:
+  - Added `OSError` fail-safe handling in cache filesystem operations (`set_cached`, `clear_cache`, `cache_stats`) so cache failures do not break analysis in restricted environments (e.g., sandbox permission limits on `~/.cache`). This is additive robustness and keeps functional behavior aligned with the spec.
+
+- Test results (command output):
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m pytest tests/test_extract_code.py tests/test_retry.py tests/test_async_batch.py tests/test_tool_use.py tests/test_cache.py -v
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/leonliu/Desktop/Projects/deeprepo/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/leonliu/Desktop/Projects/deeprepo
+configfile: pyproject.toml
+plugins: anyio-4.12.1
+collecting ... collected 24 items
+
+tests/test_extract_code.py::test_basic_python_block PASSED               [  4%]
+tests/test_extract_code.py::test_nested_backticks_in_fstring PASSED      [  8%]
+tests/test_extract_code.py::test_prose_before_code_not_extracted PASSED  [ 12%]
+tests/test_extract_code.py::test_multiple_code_blocks PASSED             [ 16%]
+tests/test_extract_code.py::test_fallback_rejects_pure_prose PASSED      [ 20%]
+tests/test_extract_code.py::test_fallback_accepts_unfenced_code PASSED   [ 25%]
+tests/test_extract_code.py::test_is_prose_line PASSED                    [ 29%]
+tests/test_extract_code.py::test_wrapped_block_prose_with_inner_fences PASSED [ 33%]
+tests/test_extract_code.py::test_code_block_with_inner_fences_not_split PASSED [ 37%]
+tests/test_retry.py::test_retry_on_500 PASSED                            [ 41%]
+tests/test_retry.py::test_no_retry_on_400 PASSED                         [ 45%]
+tests/test_retry.py::test_max_retries_exceeded PASSED                    [ 50%]
+tests/test_retry.py::test_async_retry_on_timeout PASSED                  [ 54%]
+tests/test_async_batch.py::test_batch_sync_context_still_works PASSED    [ 58%]
+tests/test_async_batch.py::test_batch_inside_existing_event_loop PASSED  [ 62%]
+tests/test_tool_use.py::test_extract_code_from_anthropic_tool_use PASSED [ 66%]
+tests/test_tool_use.py::test_extract_code_from_openai_tool_calls PASSED  [ 70%]
+tests/test_tool_use.py::test_extract_code_falls_back_to_legacy_parser_when_no_tool_use PASSED [ 75%]
+tests/test_cache.py::test_cache_miss_returns_none PASSED                 [ 79%]
+tests/test_cache.py::test_cache_hit_after_set PASSED                     [ 83%]
+tests/test_cache.py::test_cache_key_includes_model PASSED                [ 87%]
+tests/test_cache.py::test_cache_expiry PASSED                            [ 91%]
+tests/test_cache.py::test_clear_cache PASSED                             [ 95%]
+tests/test_cache.py::test_cache_stats PASSED                             [100%]
+
+============================== 24 passed in 0.59s ==============================
+```
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m deeprepo.cli cache stats
+Cache directory: ~/.cache/deeprepo/
+Entries: 0
+Size: 0.0 MB
+```
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m deeprepo.cli cache clear
+Cleared 0 cached entries.
+```
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m deeprepo.cli analyze --help
+usage: python3 -m deeprepo.cli analyze [-h] [-o OUTPUT_DIR] [-q]
+                                       [--root-model ROOT_MODEL]
+                                       [--sub-model SUB_MODEL] [--no-cache]
+                                       [--max-turns MAX_TURNS]
+                                       path
+...
+  --no-cache            Bypass sub-LLM result cache (forces fresh API calls)
+```
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m deeprepo.cli compare --help
+usage: python3 -m deeprepo.cli compare [-h] [-o OUTPUT_DIR] [-q]
+                                       [--root-model ROOT_MODEL]
+                                       [--sub-model SUB_MODEL] [--no-cache]
+                                       [--max-turns MAX_TURNS]
+                                       [--baseline-model BASELINE_MODEL]
+                                       path
+...
+  --no-cache            Bypass sub-LLM result cache (forces fresh API calls)
+```
+
 ### Task #15 — Streaming Support for Root Model Responses
 
 Implemented root-model streaming for Anthropic responses with realtime token display to `stderr`, while keeping API behavior and return types backward compatible.

@@ -38,6 +38,7 @@ def cmd_analyze(args):
         max_turns=args.max_turns,
         root_model=root_model,
         sub_model=args.sub_model,
+        use_cache=not args.no_cache,
     )
 
     # Save output
@@ -144,6 +145,7 @@ def cmd_compare(args):
             max_turns=args.max_turns,
             root_model=rlm_model,
             sub_model=args.sub_model,
+            use_cache=not args.no_cache,
         )
 
         print(f"\n\nRunning baseline analysis (root: {baseline_model})...")
@@ -244,6 +246,20 @@ def cmd_list_models(args):
     print("\n  Any OpenRouter model string is accepted. Unknown models use $1.00/$1.00 fallback pricing.")
 
 
+def cmd_cache(args):
+    """Manage the sub-LLM result cache."""
+    from .cache import cache_stats, clear_cache
+
+    if args.cache_action == "stats":
+        stats = cache_stats()
+        print("Cache directory: ~/.cache/deeprepo/")
+        print(f"Entries: {stats['entries']}")
+        print(f"Size: {stats['size_mb']} MB")
+    elif args.cache_action == "clear":
+        deleted = clear_cache()
+        print(f"Cleared {deleted} cached entries.")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="deeprepo — Deep codebase intelligence powered by recursive multi-model orchestration"
@@ -268,6 +284,11 @@ def main():
         default=DEFAULT_SUB_MODEL,
         help=f"Sub-LLM model for file analysis (default: {DEFAULT_SUB_MODEL}). Any OpenRouter model string.",
     )
+    common.add_argument(
+        "--no-cache",
+        action="store_true",
+        help="Bypass sub-LLM result cache (forces fresh API calls)",
+    )
 
     # analyze command
     p_analyze = subparsers.add_parser("analyze", parents=[common], help="Run RLM analysis")
@@ -291,6 +312,13 @@ def main():
     # list-models command
     p_list = subparsers.add_parser("list-models", help="List available sub-LLM models and pricing")
     p_list.set_defaults(func=cmd_list_models)
+
+    # cache command
+    p_cache = subparsers.add_parser("cache", help="Manage sub-LLM result cache")
+    cache_sub = p_cache.add_subparsers(dest="cache_action")
+    cache_sub.add_parser("stats", help="Show cache statistics")
+    cache_sub.add_parser("clear", help="Clear all cached results")
+    p_cache.set_defaults(func=cmd_cache)
 
     args = parser.parse_args()
 
