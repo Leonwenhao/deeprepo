@@ -139,6 +139,7 @@ class RLMEngine:
                 messages=messages,
                 system=ROOT_SYSTEM_PROMPT,
                 tools=[EXECUTE_CODE_TOOL],
+                stream=self.verbose,
             )
             root_time = time.time() - t0
 

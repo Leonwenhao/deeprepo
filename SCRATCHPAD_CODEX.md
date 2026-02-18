@@ -2,10 +2,75 @@
 
 ## Current Status
 - **Last Updated:** 2026-02-18
-- **Current Task:** #6 — Replace Fragile Code Parser with tool_use Structured Output
+- **Current Task:** #15 — Streaming Support for Root Model Responses
 - **Status:** COMPLETED
 
 ## Latest Handoff
+### Task #15 — Streaming Support for Root Model Responses
+
+Implemented root-model streaming for Anthropic responses with realtime token display to `stderr`, while keeping API behavior and return types backward compatible.
+
+- Files changed:
+  - `deeprepo/llm_clients.py` (updated)
+  - `deeprepo/rlm_scaffold.py` (updated)
+
+- Approach taken:
+  - `deeprepo/llm_clients.py`:
+    - `RootModelClient.complete(...)`:
+      - Added `stream: bool = False` parameter.
+      - When `stream=True`, uses `self.client.messages.stream(**kwargs)` wrapped in `retry_with_backoff()`.
+      - Streams incremental text via:
+        - `sys.stderr.write(text)`
+        - `sys.stderr.flush()`
+      - Writes a trailing `sys.stderr.write("\\n")` after stream completion.
+      - Uses `stream_resp.get_final_message()` to obtain the final full Anthropic `Message` object for normal downstream usage and accurate usage accounting.
+      - Keeps existing return semantics:
+        - returns full response object when `tools` is provided
+        - returns joined text string when `tools` is not provided
+    - `OpenRouterRootClient.complete(...)`:
+      - Added `stream: bool = False` parameter for signature compatibility only.
+      - No streaming implementation added (parameter intentionally ignored).
+  - `deeprepo/rlm_scaffold.py`:
+    - Updated `RLMEngine.analyze(...)` root call to pass `stream=self.verbose`.
+    - Effect: verbose mode streams root response tokens; quiet mode disables streaming.
+
+- Deviations from spec and why:
+  - None.
+
+- Test results (command output):
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m pytest tests/test_extract_code.py tests/test_retry.py tests/test_async_batch.py tests/test_tool_use.py -v
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/leonliu/Desktop/Projects/deeprepo/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/leonliu/Desktop/Projects/deeprepo
+configfile: pyproject.toml
+plugins: anyio-4.12.1
+collecting ... collected 18 items
+
+tests/test_extract_code.py::test_basic_python_block PASSED               [  5%]
+tests/test_extract_code.py::test_nested_backticks_in_fstring PASSED      [ 11%]
+tests/test_extract_code.py::test_prose_before_code_not_extracted PASSED  [ 16%]
+tests/test_extract_code.py::test_multiple_code_blocks PASSED             [ 22%]
+tests/test_extract_code.py::test_fallback_rejects_pure_prose PASSED      [ 27%]
+tests/test_extract_code.py::test_fallback_accepts_unfenced_code PASSED   [ 33%]
+tests/test_extract_code.py::test_is_prose_line PASSED                    [ 38%]
+tests/test_extract_code.py::test_wrapped_block_prose_with_inner_fences PASSED [ 44%]
+tests/test_extract_code.py::test_code_block_with_inner_fences_not_split PASSED [ 50%]
+tests/test_retry.py::test_retry_on_500 PASSED                            [ 55%]
+tests/test_retry.py::test_no_retry_on_400 PASSED                         [ 61%]
+tests/test_retry.py::test_max_retries_exceeded PASSED                    [ 66%]
+tests/test_retry.py::test_async_retry_on_timeout PASSED                  [ 72%]
+tests/test_async_batch.py::test_batch_sync_context_still_works PASSED    [ 77%]
+tests/test_async_batch.py::test_batch_inside_existing_event_loop PASSED  [ 83%]
+tests/test_tool_use.py::test_extract_code_from_anthropic_tool_use PASSED [ 88%]
+tests/test_tool_use.py::test_extract_code_from_openai_tool_calls PASSED  [ 94%]
+tests/test_tool_use.py::test_extract_code_falls_back_to_legacy_parser_when_no_tool_use PASSED [100%]
+
+============================== 18 passed in 0.46s ==============================
+```
+
 ### Task #6 — Replace Fragile Code Parser with tool_use Structured Output
 
 Implemented structured tool-use extraction for REPL execution while preserving the legacy markdown parser as a fallback.

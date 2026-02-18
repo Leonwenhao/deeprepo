@@ -132,11 +132,13 @@ class RootModelClient:
         max_tokens: int = 8192,
         temperature: float = 0.0,
         tools: list[dict] | None = None,
+        stream: bool = False,
     ) -> str:
         """Send a message to the root model and return the text response.
 
         When tools is provided, returns the full Anthropic response object
         instead of a string, so the caller can inspect tool_use blocks.
+        When stream=True, tokens are displayed on stderr in real-time.
         """
         t0 = time.time()
 
@@ -151,14 +153,33 @@ class RootModelClient:
         if tools:
             kwargs["tools"] = tools
 
-        @retry_with_backoff()
-        def _call():
-            return self.client.messages.create(**kwargs)
+        if stream:
+            @retry_with_backoff()
+            def _stream_call():
+                with self.client.messages.stream(**kwargs) as stream_resp:
+                    for text in stream_resp.text_stream:
+                        sys.stderr.write(text)
+                        sys.stderr.flush()
+                    sys.stderr.write("\n")
+                    return stream_resp.get_final_message()
 
-        try:
-            response = _call()
-        except Exception as e:
-            raise RuntimeError(f"Anthropic API error on {self.model} after retries: {e}") from e
+            try:
+                response = _stream_call()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Anthropic API error on {self.model} after retries: {e}"
+                ) from e
+        else:
+            @retry_with_backoff()
+            def _call():
+                return self.client.messages.create(**kwargs)
+
+            try:
+                response = _call()
+            except Exception as e:
+                raise RuntimeError(
+                    f"Anthropic API error on {self.model} after retries: {e}"
+                ) from e
 
         latency_ms = (time.time() - t0) * 1000
         self.usage.root_calls += 1
@@ -200,6 +221,7 @@ class OpenRouterRootClient:
         max_tokens: int = 8192,
         temperature: float = 0.0,
         tools: list[dict] | None = None,
+        stream: bool = False,
     ) -> str:
         """Send a message to the root model and return the text response."""
         t0 = time.time()

@@ -1,11 +1,11 @@
 # CTO Scratchpad — deeprepo Infrastructure Sprint
 
 ## Current Sprint Status
-- **Last Updated:** 2026-02-18 (Issue #6 reviewed and approved)
-- **Current Issue:** #15 — Streaming Support for Root Model (next)
-- **Phase:** READY_FOR_NEXT
-- **Issues Completed:** #4, #5, #7, #6
-- **Issues Remaining:** #15, #14
+- **Last Updated:** 2026-02-18 (Issue #15 reviewed and APPROVED)
+- **Current Issue:** #14 — Content-Hash Caching for Sub-LLM
+- **Phase:** PLANNING (producing Codex task prompt)
+- **Issues Completed:** #4, #5, #7, #6, #15
+- **Issues Remaining:** #14
 
 ## Codebase Notes (verified against actual code)
 - Package is `deeprepo/` (renamed from `src/` in 431b2cb)
@@ -23,6 +23,9 @@
 - Legacy `_extract_code()` preserved as fallback for text-only responses
 - `analyze()` loop: tool_use path sends per-block `tool_result` messages; text path uses legacy combined output
 - System prompt updated to prefer `execute_python` tool
+- `RootModelClient.complete()` accepts `stream: bool = False` — uses `messages.stream()` + `get_final_message()` (Issue #15)
+- `OpenRouterRootClient.complete()` accepts `stream: bool = False` — signature only, intentionally ignored (Issue #15)
+- `analyze()` passes `stream=self.verbose` — quiet mode disables streaming (Issue #15)
 
 ---
 
@@ -87,6 +90,22 @@
 - `cmd_analyze` and `cmd_compare` pass `sub_model=args.sub_model` to `run_analysis()`; baseline ignores it
 - **Deviation (acceptable):** `sub_model` added to saved metrics JSON — additive metadata only
 - **Test results:** 15/15 pass. `list-models`, `analyze --help`, `compare --help`, `baseline --help` all show `--sub-model`.
+
+---
+
+## Review: Issue #15 — Streaming Support for Root Model — APPROVED
+
+**Reviewed:** 2026-02-18
+**Verdict:** APPROVED — clean, spec-compliant, zero deviations.
+
+**What I verified:**
+- `RootModelClient.complete()`: `stream: bool = False` added. When `True`, uses `self.client.messages.stream(**kwargs)` context manager, streams tokens via `sys.stderr.write(text)` + `flush()`, trailing `\n`, `get_final_message()` for accurate usage tracking. Retry wraps the entire streaming call via `@retry_with_backoff()`.
+- Return behavior unchanged: full response when tools provided, str without.
+- `OpenRouterRootClient.complete()`: `stream: bool = False` added to signature only — intentionally ignored. Correct per spec.
+- `RLMEngine.analyze()`: passes `stream=self.verbose` to `complete()`. `--quiet` sets `verbose=False` which disables streaming.
+- No changes to baseline.py, cli.py, prompts.py, or sub-LLM clients. Correct per spec.
+- No new test file (streaming is a display feature — spec says none required).
+- **Test results:** 18/18 pass (9 extract + 4 retry + 2 async batch + 3 tool_use).
 
 ---
 
@@ -312,6 +331,7 @@ Update SCRATCHPAD_CODEX.md with:
 - **Issue #5 (asyncio):** APPROVED. ThreadPoolExecutor fallback + per-loop lock.
 - **Issue #7 (sub-model):** APPROVED. Dynamic sub-pricing, CLI flag on common args, `list-models` subcommand.
 - **Issue #6 (tool_use):** APPROVED. `complete()` returns str without tools, full response with tools. Dual-format extraction (Anthropic + OpenAI). Legacy parser as fallback. System prompt prefers tool_use.
+- **Issue #15 (streaming):** APPROVED. `stream: bool = False` on both root clients. Anthropic path uses `messages.stream()` + `get_final_message()`. OpenRouter accepts but ignores. `analyze()` passes `stream=self.verbose`.
 
 ## Open Questions
 - (none)
