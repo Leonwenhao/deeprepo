@@ -1,11 +1,11 @@
 # CTO Scratchpad — deeprepo Infrastructure Sprint
 
 ## Current Sprint Status
-- **Last Updated:** 2026-02-18 (Issue #7 reviewed, Issue #6 task sent)
-- **Current Issue:** #6 — Replace Code Parser with tool_use
-- **Phase:** TASK_SENT
-- **Issues Completed:** #4, #5, #7
-- **Issues Remaining:** #6, #15, #14
+- **Last Updated:** 2026-02-18 (Issue #6 reviewed and approved)
+- **Current Issue:** #15 — Streaming Support for Root Model (next)
+- **Phase:** READY_FOR_NEXT
+- **Issues Completed:** #4, #5, #7, #6
+- **Issues Remaining:** #15, #14
 
 ## Codebase Notes (verified against actual code)
 - Package is `deeprepo/` (renamed from `src/` in 431b2cb)
@@ -17,8 +17,12 @@
 - `run_analysis()` accepts `sub_model` param, threads to `SubModelClient`
 - CLI `common` argparse group has `--root-model` and `--sub-model`; `list-models` subcommand works
 - `run_baseline()` does NOT use SubModelClient — no sub-LLM changes needed there
-- `RootModelClient.complete()` currently returns `str` — Issue #6 will change this to return full response when `tools` provided
-- `_extract_code()` in rlm_scaffold.py: ~130 lines of fragile regex — Issue #6 adds tool_use as primary path, keeps this as fallback
+- `RootModelClient.complete()` returns `str` without tools (baseline compat), full response object with tools (Issue #6)
+- `OpenRouterRootClient.complete()` converts Anthropic tool schema to OpenAI function format when tools provided
+- `EXECUTE_CODE_TOOL` schema in rlm_scaffold.py; `_extract_code_from_response()` handles both Anthropic and OpenAI response formats
+- Legacy `_extract_code()` preserved as fallback for text-only responses
+- `analyze()` loop: tool_use path sends per-block `tool_result` messages; text path uses legacy combined output
+- System prompt updated to prefer `execute_python` tool
 
 ---
 
@@ -41,6 +45,29 @@
 
 **Reviewed:** 2026-02-18
 **Verdict:** APPROVED. See earlier notes.
+
+---
+
+## Review: Issue #6 — tool_use Structured Output — APPROVED
+
+**Reviewed:** 2026-02-18
+**Verdict:** APPROVED — clean, spec-compliant, zero deviations.
+
+**What I verified:**
+- `EXECUTE_CODE_TOOL` schema at module level (rlm_scaffold.py:37-60). Correct `input_schema` with `code` (required) and `reasoning` (optional).
+- `RootModelClient.complete()` accepts `tools` param, passes to Anthropic API, returns full response when tools provided, str otherwise (llm_clients.py:128-176). Backward compatible — baseline unaffected.
+- `OpenRouterRootClient.complete()` converts Anthropic tool schema to OpenAI function format (`input_schema` -> `parameters`), returns full response when tools provided (llm_clients.py:196-252).
+- `_extract_code_from_response()` handles Anthropic (`response.content` blocks) and OpenAI (`response.choices[0].message.tool_calls`) formats. Falls back to `_extract_code()` for text-only responses (rlm_scaffold.py:466-516).
+- Defensive: `isinstance` check on `block.input`, `json.loads` try/except for OpenAI args — good robustness.
+- `_get_response_text()` for logging across response types (rlm_scaffold.py:518-541).
+- `_append_assistant_message()` serializes content blocks via `model_dump()` with manual fallback (rlm_scaffold.py:543-590).
+- `_append_tool_result_messages()` sends per-tool outputs: Anthropic `tool_result` in single user message, OpenAI `role=tool` per call (rlm_scaffold.py:592-620).
+- `analyze()` loop passes `tools=[EXECUTE_CODE_TOOL]`, uses structured extraction first, fallback second. Per-block outputs via `all_output` list (not combined). `used_tool_use` in trajectory.
+- Legacy parser fully preserved: `_extract_code`, `_is_prose_line`, `_split_wrapped_blocks`, `_extract_inner_fences`.
+- System prompt: `## How to Execute Code` section added, Steps 1-5 updated to mention tool, Rule 1 updated. Existing code examples kept.
+- `baseline.py` NOT modified. Import verified clean.
+- No `tool_choice` forcing — model chooses freely.
+- **Test results:** 18/18 pass (9 extract + 4 retry + 2 async batch + 3 tool_use).
 
 ---
 
@@ -284,7 +311,7 @@ Update SCRATCHPAD_CODEX.md with:
 - **Issue #4 (retry):** APPROVED. Clean `_is_retryable` + decorator approach.
 - **Issue #5 (asyncio):** APPROVED. ThreadPoolExecutor fallback + per-loop lock.
 - **Issue #7 (sub-model):** APPROVED. Dynamic sub-pricing, CLI flag on common args, `list-models` subcommand.
-- **Issue #6 (tool_use) design:** `complete()` returns str without tools (backward compat for baseline), full response object with tools. `_extract_code_from_response()` handles both Anthropic and OpenAI response formats. Legacy `_extract_code()` kept as fallback. Anthropic tool_result format for Anthropic clients, OpenAI `role=tool` format for OpenRouter clients. System prompt updated to prefer tool_use but keeps markdown code block examples as fallback guidance.
+- **Issue #6 (tool_use):** APPROVED. `complete()` returns str without tools, full response with tools. Dual-format extraction (Anthropic + OpenAI). Legacy parser as fallback. System prompt prefers tool_use.
 
 ## Open Questions
 - (none)

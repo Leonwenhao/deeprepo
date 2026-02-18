@@ -11,6 +11,7 @@ This implements the RLM pattern:
 """
 
 import io
+import json
 import re
 import shutil
 import sys
@@ -32,6 +33,31 @@ from .prompts import ROOT_SYSTEM_PROMPT, SUB_SYSTEM_PROMPT, ROOT_USER_PROMPT_TEM
 MAX_OUTPUT_LENGTH = 8192  # Truncate REPL output to force model to use code
 MAX_TURNS = 15            # Maximum REPL iterations
 DEFAULT_MAX_CONCURRENT = 5  # Max parallel sub-LLM calls
+
+EXECUTE_CODE_TOOL = {
+    "name": "execute_python",
+    "description": (
+        "Execute Python code in the REPL environment. "
+        "The code has access to: codebase (dict of filepath->content), "
+        "file_tree (string), metadata (dict), llm_query(prompt) -> str, "
+        "llm_batch(prompts) -> list[str], and set_answer(text) to submit "
+        "the final analysis."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "code": {
+                "type": "string",
+                "description": "Python code to execute. Must be valid Python. Do not use markdown fencing.",
+            },
+            "reasoning": {
+                "type": "string",
+                "description": "Brief explanation of what this code does and why (1-2 sentences).",
+            },
+        },
+        "required": ["code"],
+    },
+}
 
 
 class RLMEngine:
@@ -107,31 +133,39 @@ class RLMEngine:
                 print(f"REPL Turn {turn}/{self.max_turns}")
                 print(f"{'='*60}")
 
-            # Get root model's response (should contain Python code)
+            # Get root model's response with tool definition
             t0 = time.time()
-            response_text = self.root_client.complete(
+            response = self.root_client.complete(
                 messages=messages,
                 system=ROOT_SYSTEM_PROMPT,
+                tools=[EXECUTE_CODE_TOOL],
             )
             root_time = time.time() - t0
 
+            # Extract code — prefer tool_use blocks, fall back to text parsing
+            code_blocks, tool_use_info = self._extract_code_from_response(response)
+            response_text = self._get_response_text(response)
+
             if self.verbose:
                 print(f"Root model responded in {root_time:.1f}s ({len(response_text)} chars)")
-
-            # Extract code blocks from the response
-            code_blocks = self._extract_code(response_text)
+                if tool_use_info:
+                    print(f"  [tool_use] {len(tool_use_info)} execute_python call(s)")
+                else:
+                    print("  [text] Using legacy code extraction")
 
             if not code_blocks:
                 if self.verbose:
                     print("No code blocks found in response. Checking if model is done...")
-                # Model might have set the answer in a previous turn's code
                 if answer["ready"]:
                     break
-                # Prompt it to write code
-                messages.append({"role": "assistant", "content": response_text})
+                # Prompt model to use the tool
+                self._append_assistant_message(messages, response)
                 messages.append({
                     "role": "user",
-                    "content": "Please write Python code in a ```python code block to continue your analysis. Use the REPL to explore the codebase."
+                    "content": (
+                        "Please use the execute_python tool to write and run Python code "
+                        "to continue your analysis. Use the REPL to explore the codebase."
+                    ),
                 })
                 continue
 
@@ -168,6 +202,7 @@ class RLMEngine:
                 "repl_output": combined_output,
                 "answer_ready": answer["ready"],
                 "root_latency_s": root_time,
+                "used_tool_use": bool(tool_use_info),
             })
 
             # Check if answer is ready
@@ -177,11 +212,21 @@ class RLMEngine:
                 break
 
             # Feed REPL output back to root model
-            messages.append({"role": "assistant", "content": response_text})
-            messages.append({
-                "role": "user",
-                "content": f"REPL Output:\n```\n{combined_output}\n```\n\nContinue your analysis. Remember to set answer[\"ready\"] = True when done."
-            })
+            if tool_use_info:
+                # Tool_use path: send structured tool_result messages
+                self._append_tool_result_messages(
+                    messages, response, tool_use_info, all_output
+                )
+            else:
+                # Text-only path: send as user message (legacy behavior)
+                self._append_assistant_message(messages, response)
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        f"REPL Output:\n```\n{combined_output}\n```\n\n"
+                        "Continue your analysis. Remember to call set_answer(text) when done."
+                    ),
+                })
 
         # 5. Return results
         if not answer["ready"]:
@@ -417,6 +462,162 @@ class RLMEngine:
                     blocks = ["\n".join(code_lines)]
 
         return blocks
+
+    def _extract_code_from_response(self, response) -> tuple[list[str], list[dict]]:
+        """Extract code from tool_use blocks in the response.
+
+        Returns:
+            (code_blocks, tool_use_info) where:
+            - code_blocks: list of Python code strings to execute
+            - tool_use_info: list of dicts with 'id' key for each tool_use block
+              (empty list if no tool_use found — means text-only response)
+        """
+        code_blocks: list[str] = []
+        tool_use_info: list[dict] = []
+        text_parts: list[str] = []
+
+        if isinstance(response, str):
+            return self._extract_code(response), []
+
+        if hasattr(response, "content") and isinstance(response.content, list):
+            # Anthropic response format
+            for block in response.content:
+                if block.type == "tool_use" and block.name == "execute_python":
+                    block_input = block.input if isinstance(block.input, dict) else {}
+                    code = block_input.get("code")
+                    if isinstance(code, str):
+                        code_blocks.append(code)
+                        tool_use_info.append({"id": block.id})
+                elif block.type == "text":
+                    text_parts.append(block.text)
+        elif hasattr(response, "choices"):
+            # OpenAI/OpenRouter response format
+            message = response.choices[0].message
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    if tc.function.name != "execute_python":
+                        continue
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except (TypeError, json.JSONDecodeError):
+                        args = {}
+                    code = args.get("code")
+                    if isinstance(code, str):
+                        code_blocks.append(code)
+                        tool_use_info.append({"id": tc.id})
+            if message.content:
+                text_parts.append(message.content)
+
+        if code_blocks:
+            return code_blocks, tool_use_info
+
+        # Fallback: text-only response — use legacy parser
+        full_text = "\n".join(text_parts)
+        return self._extract_code(full_text), []
+
+    def _get_response_text(self, response) -> str:
+        """Extract text content from response for logging and trajectory."""
+        if isinstance(response, str):
+            return response
+        if hasattr(response, "content") and isinstance(response.content, list):
+            # Anthropic
+            parts = []
+            for block in response.content:
+                if block.type == "text":
+                    parts.append(block.text)
+                elif block.type == "tool_use":
+                    parts.append(f"[tool_use: {block.name}]")
+            return "\n".join(parts)
+        if hasattr(response, "choices"):
+            # OpenAI
+            msg = response.choices[0].message
+            parts = []
+            if msg.content:
+                parts.append(msg.content)
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    parts.append(f"[tool_use: {tc.function.name}]")
+            return "\n".join(parts)
+        return str(response)
+
+    def _append_assistant_message(self, messages: list[dict], response) -> None:
+        """Append the assistant's response to the message list."""
+        if isinstance(response, str):
+            messages.append({"role": "assistant", "content": response})
+            return
+
+        if hasattr(response, "content") and isinstance(response.content, list):
+            # Anthropic — serialize content blocks to dicts
+            content_blocks = []
+            for block in response.content:
+                if hasattr(block, "model_dump"):
+                    content_blocks.append(block.model_dump())
+                else:
+                    if block.type == "text":
+                        content_blocks.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": block.id,
+                            "name": block.name,
+                            "input": block.input,
+                        })
+            messages.append({"role": "assistant", "content": content_blocks})
+            return
+
+        if hasattr(response, "choices"):
+            # OpenAI — reconstruct the assistant message
+            msg = response.choices[0].message
+            entry: dict = {"role": "assistant", "content": msg.content or ""}
+            if msg.tool_calls:
+                tool_calls = []
+                for tc in msg.tool_calls:
+                    if hasattr(tc, "model_dump"):
+                        tool_calls.append(tc.model_dump())
+                    else:
+                        tool_calls.append({
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        })
+                entry["tool_calls"] = tool_calls
+            messages.append(entry)
+            return
+
+        messages.append({"role": "assistant", "content": str(response)})
+
+    def _append_tool_result_messages(
+        self,
+        messages: list[dict],
+        response,
+        tool_use_info: list[dict],
+        outputs: list[str],
+    ) -> None:
+        """Append assistant message + tool_result messages after tool_use execution."""
+        # First, append the assistant's response (includes tool_use blocks)
+        self._append_assistant_message(messages, response)
+
+        if hasattr(response, "content") and isinstance(response.content, list):
+            # Anthropic format: tool_results go in a single user message
+            tool_results = []
+            for info, output in zip(tool_use_info, outputs):
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": info["id"],
+                    "content": output,
+                })
+            messages.append({"role": "user", "content": tool_results})
+        elif hasattr(response, "choices"):
+            # OpenAI format: each tool_result is a separate "tool" role message
+            for info, output in zip(tool_use_info, outputs):
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": info["id"],
+                    "content": output,
+                })
 
     def _execute_code(self, code: str, namespace: dict) -> str:
         """

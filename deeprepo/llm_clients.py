@@ -131,8 +131,13 @@ class RootModelClient:
         system: str = "",
         max_tokens: int = 8192,
         temperature: float = 0.0,
+        tools: list[dict] | None = None,
     ) -> str:
-        """Send a message to the root model and return the text response."""
+        """Send a message to the root model and return the text response.
+
+        When tools is provided, returns the full Anthropic response object
+        instead of a string, so the caller can inspect tool_use blocks.
+        """
         t0 = time.time()
 
         kwargs = {
@@ -143,6 +148,8 @@ class RootModelClient:
         }
         if system:
             kwargs["system"] = system
+        if tools:
+            kwargs["tools"] = tools
 
         @retry_with_backoff()
         def _call():
@@ -159,7 +166,10 @@ class RootModelClient:
         self.usage.root_output_tokens += response.usage.output_tokens
         self.usage.root_latency_ms.append(latency_ms)
 
-        # Extract text content
+        if tools:
+            return response
+
+        # Text-only path (backward compatible)
         text_parts = [
             block.text for block in response.content if block.type == "text"
         ]
@@ -189,6 +199,7 @@ class OpenRouterRootClient:
         system: str = "",
         max_tokens: int = 8192,
         temperature: float = 0.0,
+        tools: list[dict] | None = None,
     ) -> str:
         """Send a message to the root model and return the text response."""
         t0 = time.time()
@@ -199,14 +210,29 @@ class OpenRouterRootClient:
             api_messages.append({"role": "system", "content": system})
         api_messages.extend(messages)
 
+        kwargs = {
+            "model": self.model,
+            "messages": api_messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if tools:
+            # Convert Anthropic tool schema -> OpenAI function-calling format
+            openai_tools = []
+            for tool in tools:
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "parameters": tool["input_schema"],
+                    },
+                })
+            kwargs["tools"] = openai_tools
+
         @retry_with_backoff()
         def _call():
-            return self.client.chat.completions.create(
-                model=self.model,
-                messages=api_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            )
+            return self.client.chat.completions.create(**kwargs)
 
         try:
             response = _call()
@@ -219,6 +245,9 @@ class OpenRouterRootClient:
             self.usage.root_input_tokens += response.usage.prompt_tokens or 0
             self.usage.root_output_tokens += response.usage.completion_tokens or 0
         self.usage.root_latency_ms.append(latency_ms)
+
+        if tools:
+            return response
 
         return response.choices[0].message.content or ""
 

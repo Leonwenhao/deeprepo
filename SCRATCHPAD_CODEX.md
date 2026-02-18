@@ -2,10 +2,102 @@
 
 ## Current Status
 - **Last Updated:** 2026-02-18
-- **Current Task:** #7 — Configurable Sub-LLM Model (--sub-model)
+- **Current Task:** #6 — Replace Fragile Code Parser with tool_use Structured Output
 - **Status:** COMPLETED
 
 ## Latest Handoff
+### Task #6 — Replace Fragile Code Parser with tool_use Structured Output
+
+Implemented structured tool-use extraction for REPL execution while preserving the legacy markdown parser as a fallback.
+
+- Files changed:
+  - `deeprepo/llm_clients.py` (updated)
+  - `deeprepo/rlm_scaffold.py` (updated)
+  - `deeprepo/prompts.py` (updated)
+  - `tests/test_tool_use.py` (new)
+
+- Approach taken:
+  - `deeprepo/llm_clients.py`:
+    - Added optional `tools: list[dict] | None = None` to:
+      - `RootModelClient.complete(...)`
+      - `OpenRouterRootClient.complete(...)`
+    - Anthropic path:
+      - Passes `tools` into `messages.create(...)` when provided.
+      - Returns full response object when `tools` is set.
+      - Keeps legacy string extraction path when `tools` is not set (baseline compatibility preserved).
+    - OpenRouter path:
+      - Converts Anthropic tool schema to OpenAI function-calling format:
+        - `name`, `description`, `input_schema -> parameters`
+      - Passes converted `tools` in request kwargs.
+      - Returns full response object when `tools` is set; otherwise returns text content.
+  - `deeprepo/rlm_scaffold.py`:
+    - Added `import json`.
+    - Added module-level `EXECUTE_CODE_TOOL` schema for `execute_python`.
+    - Added new helper methods on `RLMEngine`:
+      - `_extract_code_from_response(...)`:
+        - Extracts code from Anthropic `tool_use` blocks and OpenAI/OpenRouter `tool_calls`.
+        - Returns `(code_blocks, tool_use_info)` with per-tool-call IDs.
+        - Falls back to legacy `_extract_code(...)` for text-only responses.
+      - `_get_response_text(...)` for logging and trajectory entries across response formats.
+      - `_append_assistant_message(...)` to append assistant output in provider-correct message shape.
+      - `_append_tool_result_messages(...)` to send execution outputs back as:
+        - Anthropic: a single `user` message containing `tool_result` blocks.
+        - OpenAI/OpenRouter: one `role="tool"` message per tool call.
+    - Updated `analyze(...)` REPL loop:
+      - Calls `self.root_client.complete(..., tools=[EXECUTE_CODE_TOOL])`.
+      - Uses `_extract_code_from_response(...)` and `_get_response_text(...)`.
+      - Preserves no-code fallback behavior with a tool-use nudge.
+      - Records `used_tool_use` in trajectory.
+      - Sends per-code-block outputs via `all_output` (not combined output) when building tool results.
+    - Legacy parser methods are fully preserved:
+      - `_extract_code`, `_is_prose_line`, `_split_wrapped_blocks`, `_extract_inner_fences`.
+  - `deeprepo/prompts.py`:
+    - Added `## How to Execute Code` section after `## Available Functions`.
+    - Updated Step 1-5 lead lines to prefer using `execute_python` tool.
+    - Updated Rule 1 to nudge first-turn tool use and delay `set_answer()` until ready.
+    - Kept existing code examples and overall prompt structure.
+  - `tests/test_tool_use.py` (new):
+    - `test_extract_code_from_anthropic_tool_use`
+    - `test_extract_code_from_openai_tool_calls`
+    - `test_extract_code_falls_back_to_legacy_parser_when_no_tool_use`
+
+- Deviations from spec and why:
+  - None.
+
+- Test results (command output):
+
+```bash
+$ UV_CACHE_DIR=/tmp/uv-cache uv run python -m pytest tests/test_extract_code.py tests/test_retry.py tests/test_async_batch.py tests/test_tool_use.py -v
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.0.2, pluggy-1.6.0 -- /Users/leonliu/Desktop/Projects/deeprepo/.venv/bin/python3
+cachedir: .pytest_cache
+rootdir: /Users/leonliu/Desktop/Projects/deeprepo
+configfile: pyproject.toml
+plugins: anyio-4.12.1
+collecting ... collected 18 items
+
+tests/test_extract_code.py::test_basic_python_block PASSED               [  5%]
+tests/test_extract_code.py::test_nested_backticks_in_fstring PASSED      [ 11%]
+tests/test_extract_code.py::test_prose_before_code_not_extracted PASSED  [ 16%]
+tests/test_extract_code.py::test_multiple_code_blocks PASSED             [ 22%]
+tests/test_extract_code.py::test_fallback_rejects_pure_prose PASSED      [ 27%]
+tests/test_extract_code.py::test_fallback_accepts_unfenced_code PASSED   [ 33%]
+tests/test_extract_code.py::test_is_prose_line PASSED                    [ 38%]
+tests/test_extract_code.py::test_wrapped_block_prose_with_inner_fences PASSED [ 44%]
+tests/test_extract_code.py::test_code_block_with_inner_fences_not_split PASSED [ 50%]
+tests/test_retry.py::test_retry_on_500 PASSED                            [ 55%]
+tests/test_retry.py::test_no_retry_on_400 PASSED                         [ 61%]
+tests/test_retry.py::test_max_retries_exceeded PASSED                    [ 66%]
+tests/test_retry.py::test_async_retry_on_timeout PASSED                  [ 72%]
+tests/test_async_batch.py::test_batch_sync_context_still_works PASSED    [ 77%]
+tests/test_async_batch.py::test_batch_inside_existing_event_loop PASSED  [ 83%]
+tests/test_tool_use.py::test_extract_code_from_anthropic_tool_use PASSED [ 88%]
+tests/test_tool_use.py::test_extract_code_from_openai_tool_calls PASSED  [ 94%]
+tests/test_tool_use.py::test_extract_code_falls_back_to_legacy_parser_when_no_tool_use PASSED [100%]
+
+============================== 18 passed in 1.05s ==============================
+```
+
 ### Task #7 — Configurable Sub-LLM Model (--sub-model)
 
 Implemented configurable sub-LLM model selection and dynamic sub-model pricing, then threaded `sub_model` through CLI -> `run_analysis()` -> `SubModelClient`.

@@ -22,6 +22,12 @@ A codebase has been loaded into your Python REPL environment. You do NOT see the
 - `llm_batch(prompts: list[str]) -> list[str]` — send multiple tasks in PARALLEL (faster, use this when possible)
 - `set_answer(text: str)` — set your final analysis text AND mark it as ready in one call. **Always use this to submit your final answer** (avoids string-escaping issues with direct assignment).
 
+## How to Execute Code
+
+You have access to an `execute_python` tool. **Always prefer using this tool** to run Python code in the REPL — simply call the tool with your code string. Do not wrap code in markdown fences when using the tool.
+
+If the tool is not available, you may fall back to writing code in ```python code blocks, which will be extracted and executed automatically.
+
 ## Your Task
 Produce a comprehensive codebase analysis document with these sections:
 
@@ -32,14 +38,14 @@ Produce a comprehensive codebase analysis document with these sections:
 
 ## How to Work (IMPORTANT — read carefully)
 
-**Step 1: Explore structure** — print the file tree and metadata first. Understand what you're working with.
+**Step 1: Explore structure** — Use the `execute_python` tool to print the file tree and metadata first. Understand what you're working with.
 
 ```python
 print(file_tree)
 print(metadata)
 ```
 
-**Step 2: Identify key files** — look at entry points, config files, and the largest files.
+**Step 2: Identify key files** — Use the `execute_python` tool to inspect entry points, config files, and the largest files.
 
 ```python
 # Peek at a file's first 200 chars
@@ -48,7 +54,7 @@ for ep in metadata["entry_points"]:
     print(codebase[ep][:200])
 ```
 
-**Step 3: Dispatch analysis via sub-LLMs** — use llm_batch() for parallel analysis.
+**Step 3: Dispatch analysis via sub-LLMs** — Use the `execute_python` tool and call llm_batch() for parallel analysis.
 
 ```python
 # Analyze multiple files in parallel
@@ -62,7 +68,7 @@ for f, r in zip(files_to_analyze, results):
     print(f"\\n=== {f} ===\\n{r[:500]}")
 ```
 
-**Step 4: Trace dependencies** — use code to find imports and understand module relationships.
+**Step 4: Trace dependencies** — Use the `execute_python` tool and code to find imports and understand module relationships.
 
 ```python
 import re
@@ -73,7 +79,7 @@ for filepath, content in codebase.items():
             print(f"{filepath}: {imports}")
 ```
 
-**Step 5: Synthesize and finalize** — build your analysis as a list of lines, then call `set_answer()`.
+**Step 5: Synthesize and finalize** — Use the `execute_python` tool to build your analysis as a list of lines, then call `set_answer()`.
 
 ```python
 # Build the analysis using a list of lines (avoids string-escaping issues in the REPL)
@@ -95,7 +101,7 @@ set_answer("\\n".join(lines))
 **IMPORTANT:** Always use `set_answer(text)` to submit your final analysis. Do NOT assign to `answer["content"]` with triple-quoted strings — they cause syntax errors in the REPL. Build your text with a list of `lines.append()` calls and pass `"\\n".join(lines)` to `set_answer()`.
 
 ## Rules
-1. **NEVER call set_answer() on your first turn** — you need to gather information first
+1. **Use the `execute_python` tool from your first turn** to gather information first, and do not call set_answer() until you're ready to finalize
 2. **Use llm_batch() for parallel analysis** — it's faster and cheaper than sequential llm_query() calls
 3. **Keep sub-LLM prompts focused** — one file or one specific question per prompt
 4. **Build answer iteratively** — accumulate findings in variables across turns
