@@ -18,6 +18,7 @@ import sys
 import time
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
+from typing import TYPE_CHECKING
 
 from .llm_clients import (
     DEFAULT_SUB_MODEL,
@@ -26,8 +27,9 @@ from .llm_clients import (
     TokenUsage,
     create_root_client,
 )
-from .codebase_loader import load_codebase, format_metadata_for_prompt
-from .prompts import ROOT_SYSTEM_PROMPT, SUB_SYSTEM_PROMPT, ROOT_USER_PROMPT_TEMPLATE
+
+if TYPE_CHECKING:
+    from .domains.base import DomainConfig
 
 
 MAX_OUTPUT_LENGTH = 8192  # Truncate REPL output to force model to use code
@@ -84,12 +86,13 @@ class RLMEngine:
         self.max_output_length = max_output_length
         self.verbose = verbose
 
-    def analyze(self, codebase_path: str) -> dict:
+    def analyze(self, path: str, domain: "DomainConfig") -> dict:
         """
-        Run RLM analysis on a codebase.
+        Run RLM analysis on domain data.
         
         Args:
-            codebase_path: Local path to the codebase
+            path: Local path to analyze
+            domain: Domain configuration
             
         Returns:
             {
@@ -99,11 +102,11 @@ class RLMEngine:
                 "trajectory": list[dict], # Full conversation trajectory
             }
         """
-        # 1. Load codebase
+        # 1. Load data using domain's loader
         if self.verbose:
-            print(f"Loading codebase from {codebase_path}...")
-        data = load_codebase(codebase_path)
-        codebase = data["codebase"]
+            print(f"Loading {domain.label.lower()} from {path}...")
+        data = domain.loader(path)
+        documents = data[domain.data_variable_name]
         file_tree = data["file_tree"]
         metadata = data["metadata"]
 
@@ -112,11 +115,18 @@ class RLMEngine:
 
         # 2. Build the REPL namespace (what the root model's code can access)
         answer = {"content": "", "ready": False}
-        repl_namespace = self._build_namespace(codebase, file_tree, metadata, answer)
+        repl_namespace = self._build_namespace(
+            documents,
+            file_tree,
+            metadata,
+            answer,
+            data_var_name=domain.data_variable_name,
+            sub_system_prompt=domain.sub_system_prompt,
+        )
 
         # 3. Format the initial prompt (metadata + file tree, NOT file contents)
-        metadata_str = format_metadata_for_prompt(metadata)
-        user_prompt = ROOT_USER_PROMPT_TEMPLATE.format(
+        metadata_str = domain.format_metadata(metadata)
+        user_prompt = domain.user_prompt_template.format(
             metadata_str=metadata_str,
             file_tree=file_tree,
         )
@@ -137,7 +147,7 @@ class RLMEngine:
             t0 = time.time()
             response = self.root_client.complete(
                 messages=messages,
-                system=ROOT_SYSTEM_PROMPT,
+                system=domain.root_system_prompt,
                 tools=[EXECUTE_CODE_TOOL],
                 stream=self.verbose,
             )
@@ -248,10 +258,12 @@ class RLMEngine:
 
     def _build_namespace(
         self,
-        codebase: dict,
+        documents: dict,
         file_tree: str,
         metadata: dict,
         answer: dict,
+        data_var_name: str = "codebase",
+        sub_system_prompt: str = "",
     ) -> dict:
         """
         Build the Python namespace for the REPL.
@@ -264,13 +276,13 @@ class RLMEngine:
         """
         def llm_query(prompt: str) -> str:
             """Send a focused task to a sub-LLM worker."""
-            return self.sub_client.query(prompt, system=SUB_SYSTEM_PROMPT)
+            return self.sub_client.query(prompt, system=sub_system_prompt)
 
         def llm_batch(prompts: list[str]) -> list[str]:
             """Send multiple tasks to sub-LLM workers in parallel."""
             return self.sub_client.batch(
                 prompts,
-                system=SUB_SYSTEM_PROMPT,
+                system=sub_system_prompt,
                 max_concurrent=DEFAULT_MAX_CONCURRENT,
             )
 
@@ -286,7 +298,7 @@ class RLMEngine:
 
         namespace = {
             # Data (the codebase lives HERE, not in the model's context)
-            "codebase": codebase,
+            data_var_name: documents,
             "file_tree": file_tree,
             "metadata": metadata,
             # Sub-LLM functions
@@ -654,6 +666,7 @@ def run_analysis(
     root_model: str = "claude-opus-4-6",
     sub_model: str = DEFAULT_SUB_MODEL,
     use_cache: bool = True,
+    domain: str = "code",
 ) -> dict:
     """
     Convenience function to run a full RLM analysis.
@@ -665,10 +678,15 @@ def run_analysis(
         root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-5-20250929")
         sub_model: OpenRouter model string for sub-LLM file analysis workers
         use_cache: Enable sub-LLM response cache for repeated prompts
+        domain: Domain name from registry (default: "code")
 
     Returns:
         dict with analysis, turns, usage, trajectory
     """
+    from .domains import get_domain
+
+    domain_config = get_domain(domain)
+
     # Validate path for local directories
     actual_path = codebase_path
     is_temp = False
@@ -682,10 +700,13 @@ def run_analysis(
 
     # Handle git URLs
     if codebase_path.startswith(("http://", "https://", "git@")):
-        from .codebase_loader import clone_repo
+        if domain_config.clone_handler is None:
+            raise ValueError(
+                f"Domain '{domain}' does not support URL inputs."
+            )
         if verbose:
             print(f"Cloning {codebase_path}...")
-        actual_path = clone_repo(codebase_path)
+        actual_path = domain_config.clone_handler(codebase_path)
         is_temp = True
         if verbose:
             print(f"Cloned to {actual_path}")
@@ -706,7 +727,7 @@ def run_analysis(
             verbose=verbose,
         )
 
-        result = engine.analyze(actual_path)
+        result = engine.analyze(actual_path, domain=domain_config)
 
         if verbose:
             print(f"\n{usage.summary()}")

@@ -7,8 +7,14 @@ Used to measure what RLM buys us over the naive approach.
 
 import shutil
 import time
-from .llm_clients import RootModelClient, TokenUsage, create_root_client
-from .codebase_loader import load_codebase, format_metadata_for_prompt
+try:
+    from .llm_clients import RootModelClient, TokenUsage, create_root_client
+    _LLM_CLIENTS_IMPORT_ERROR: Exception | None = None
+except Exception as exc:  # pragma: no cover - environment-specific import issue
+    RootModelClient = None  # type: ignore[assignment]
+    TokenUsage = None  # type: ignore[assignment]
+    create_root_client = None  # type: ignore[assignment]
+    _LLM_CLIENTS_IMPORT_ERROR = exc
 
 
 BASELINE_SYSTEM_PROMPT = """You are a senior software architect performing a codebase review. 
@@ -27,6 +33,7 @@ def run_baseline(
     max_chars: int = 180_000,  # ~45k tokens, leaving room for response
     verbose: bool = True,
     root_model: str = "claude-opus-4-6",
+    domain: str = "code",
 ) -> dict:
     """
     Run a single-model baseline analysis.
@@ -42,6 +49,10 @@ def run_baseline(
     Returns:
         dict with analysis, usage, included_files, excluded_files
     """
+    from .domains import get_domain
+
+    domain_config = get_domain(domain)
+
     # Validate path for local directories
     actual_path = codebase_path
     is_temp = False
@@ -55,18 +66,19 @@ def run_baseline(
 
     # Handle git URLs
     if codebase_path.startswith(("http://", "https://", "git@")):
-        from .codebase_loader import clone_repo
+        if domain_config.clone_handler is None:
+            raise ValueError(f"Domain '{domain}' does not support URL inputs.")
         if verbose:
             print(f"Cloning {codebase_path}...")
-        actual_path = clone_repo(codebase_path)
+        actual_path = domain_config.clone_handler(codebase_path)
         is_temp = True
         if verbose:
             print(f"Cloned to {actual_path}")
 
     try:
         # Load codebase
-        data = load_codebase(actual_path)
-        codebase = data["codebase"]
+        data = domain_config.loader(actual_path)
+        codebase = data[domain_config.data_variable_name]
         metadata = data["metadata"]
         file_tree = data["file_tree"]
 
@@ -74,7 +86,7 @@ def run_baseline(
             print(f"Loaded {metadata['total_files']} files, {metadata['total_chars']:,} chars")
 
         # Build the prompt by concatenating files until we hit the limit
-        metadata_str = format_metadata_for_prompt(metadata)
+        metadata_str = domain_config.format_metadata(metadata)
         prompt_parts = [
             f"## Repository Metadata\n{metadata_str}\n",
             f"## File Tree\n{file_tree}\n",
@@ -108,6 +120,11 @@ def run_baseline(
             print(f"  Included: {len(included_files)} files ({current_chars:,} chars)")
 
         # Send to root model
+        if _LLM_CLIENTS_IMPORT_ERROR is not None:
+            raise RuntimeError(
+                "Failed to import llm_clients (known openai/Python 3.14 issue in this environment)."
+            ) from _LLM_CLIENTS_IMPORT_ERROR
+
         usage = TokenUsage()
         usage.set_root_pricing(root_model)
         client = create_root_client(usage=usage, model=root_model)
@@ -118,7 +135,7 @@ def run_baseline(
         t0 = time.time()
         analysis = client.complete(
             messages=[{"role": "user", "content": prompt}],
-            system=BASELINE_SYSTEM_PROMPT,
+            system=domain_config.baseline_system_prompt,
             max_tokens=16384,  # Allow longer response for baseline
         )
         elapsed = time.time() - t0

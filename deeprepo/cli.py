@@ -16,7 +16,12 @@ import time
 from pathlib import Path
 
 from . import __version__
-from .llm_clients import DEFAULT_SUB_MODEL
+try:
+    from .llm_clients import DEFAULT_SUB_MODEL
+except Exception:  # pragma: no cover - environment-specific import issue
+    # Fallback keeps CLI help and domain listing usable in environments where
+    # llm_clients cannot import due dependency/runtime issues.
+    DEFAULT_SUB_MODEL = "minimax/minimax-m2.5"
 
 # Map short names to model strings
 ROOT_MODEL_MAP = {
@@ -27,7 +32,10 @@ ROOT_MODEL_MAP = {
 
 
 def cmd_analyze(args):
-    """Run RLM analysis on a codebase."""
+    """Run RLM analysis."""
+    from .domains import get_domain
+
+    get_domain(args.domain)  # Validate domain before deeper runtime imports/calls.
     from .rlm_scaffold import run_analysis
 
     root_model = ROOT_MODEL_MAP.get(args.root_model, args.root_model)
@@ -39,6 +47,7 @@ def cmd_analyze(args):
         root_model=root_model,
         sub_model=args.sub_model,
         use_cache=not args.no_cache,
+        domain=args.domain,
     )
 
     # Save output
@@ -47,15 +56,17 @@ def cmd_analyze(args):
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     repo_name = Path(args.path).name if not args.path.startswith("http") else args.path.split("/")[-1]
+    domain_prefix = f"deeprepo_{args.domain}" if args.domain != "code" else "deeprepo"
 
     # Save analysis
-    analysis_path = output_dir / f"deeprepo_{repo_name}_{timestamp}.md"
+    analysis_path = output_dir / f"{domain_prefix}_{repo_name}_{timestamp}.md"
     analysis_path.write_text(result["analysis"])
     print(f"\n📄 Analysis saved to: {analysis_path}")
 
     # Save metrics
     metrics = {
         "mode": "rlm",
+        "domain": args.domain,
         "root_model": root_model,
         "sub_model": args.sub_model,
         "repo": args.path,
@@ -70,7 +81,7 @@ def cmd_analyze(args):
         "sub_cost": result["usage"].sub_cost,
         "total_cost": result["usage"].total_cost,
     }
-    metrics_path = output_dir / f"deeprepo_{repo_name}_{timestamp}_metrics.json"
+    metrics_path = output_dir / f"{domain_prefix}_{repo_name}_{timestamp}_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2))
     print(f"📊 Metrics saved to: {metrics_path}")
     print(f"\n{result['usage'].summary()}")
@@ -78,6 +89,9 @@ def cmd_analyze(args):
 
 def cmd_baseline(args):
     """Run single-model baseline analysis."""
+    from .domains import get_domain
+
+    get_domain(args.domain)  # Validate domain before deeper runtime imports/calls.
     from .baseline import run_baseline
 
     root_model = ROOT_MODEL_MAP.get(args.root_model, args.root_model)
@@ -86,6 +100,7 @@ def cmd_baseline(args):
         codebase_path=args.path,
         verbose=not args.quiet,
         root_model=root_model,
+        domain=args.domain,
     )
 
     # Save output
@@ -94,13 +109,15 @@ def cmd_baseline(args):
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     repo_name = Path(args.path).name
+    domain_prefix = f"baseline_{args.domain}" if args.domain != "code" else "baseline"
 
-    analysis_path = output_dir / f"baseline_{repo_name}_{timestamp}.md"
+    analysis_path = output_dir / f"{domain_prefix}_{repo_name}_{timestamp}.md"
     analysis_path.write_text(result["analysis"])
     print(f"\n📄 Baseline analysis saved to: {analysis_path}")
 
     metrics = {
         "mode": "baseline",
+        "domain": args.domain,
         "repo": args.path,
         "included_files": len(result["included_files"]),
         "excluded_files": len(result["excluded_files"]),
@@ -111,7 +128,7 @@ def cmd_baseline(args):
         "root_cost": result["usage"].root_cost,
         "total_cost": result["usage"].total_cost,
     }
-    metrics_path = output_dir / f"baseline_{repo_name}_{timestamp}_metrics.json"
+    metrics_path = output_dir / f"{domain_prefix}_{repo_name}_{timestamp}_metrics.json"
     metrics_path.write_text(json.dumps(metrics, indent=2))
     print(f"📊 Metrics saved to: {metrics_path}")
     print(f"\n{result['usage'].summary()}")
@@ -119,6 +136,9 @@ def cmd_baseline(args):
 
 def cmd_compare(args):
     """Run both RLM and baseline, then compare."""
+    from .domains import get_domain
+
+    domain_config = get_domain(args.domain)
     from .rlm_scaffold import run_analysis
     from .baseline import run_baseline
 
@@ -129,9 +149,12 @@ def cmd_compare(args):
     actual_path = args.path
     is_temp = False
     if args.path.startswith(("http://", "https://", "git@")):
-        from .codebase_loader import clone_repo
+        if domain_config.clone_handler is None:
+            raise ValueError(
+                f"Domain '{args.domain}' does not support URL inputs. Provide a local directory path."
+            )
         print(f"Cloning {args.path}...")
-        actual_path = clone_repo(args.path)
+        actual_path = domain_config.clone_handler(args.path)
         is_temp = True
         print(f"Cloned to {actual_path}")
 
@@ -146,6 +169,7 @@ def cmd_compare(args):
             root_model=rlm_model,
             sub_model=args.sub_model,
             use_cache=not args.no_cache,
+            domain=args.domain,
         )
 
         print(f"\n\nRunning baseline analysis (root: {baseline_model})...")
@@ -155,6 +179,7 @@ def cmd_compare(args):
             codebase_path=actual_path,
             verbose=not args.quiet,
             root_model=baseline_model,
+            domain=args.domain,
         )
     finally:
         if is_temp:
@@ -165,13 +190,18 @@ def cmd_compare(args):
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
     repo_name = Path(args.path).name
+    rlm_prefix = f"deeprepo_{args.domain}" if args.domain != "code" else "deeprepo"
+    baseline_prefix = f"baseline_{args.domain}" if args.domain != "code" else "baseline"
 
-    (output_dir / f"deeprepo_{repo_name}_{timestamp}.md").write_text(rlm_result["analysis"])
-    (output_dir / f"baseline_{repo_name}_{timestamp}.md").write_text(baseline_result["analysis"])
+    (output_dir / f"{rlm_prefix}_{repo_name}_{timestamp}.md").write_text(rlm_result["analysis"])
+    (output_dir / f"{baseline_prefix}_{repo_name}_{timestamp}.md").write_text(
+        baseline_result["analysis"]
+    )
 
     # Save metrics JSON for both sides
     rlm_metrics = {
         "mode": "rlm",
+        "domain": args.domain,
         "root_model": rlm_model,
         "sub_model": args.sub_model,
         "repo": args.path,
@@ -189,6 +219,7 @@ def cmd_compare(args):
     }
     baseline_metrics = {
         "mode": "baseline",
+        "domain": args.domain,
         "root_model": baseline_model,
         "repo": args.path,
         "root_calls": baseline_result["usage"].root_calls,
@@ -202,10 +233,10 @@ def cmd_compare(args):
         "elapsed_seconds": baseline_result["elapsed_seconds"],
         "analysis_chars": len(baseline_result["analysis"]),
     }
-    (output_dir / f"deeprepo_{repo_name}_{timestamp}_metrics.json").write_text(
+    (output_dir / f"{rlm_prefix}_{repo_name}_{timestamp}_metrics.json").write_text(
         json.dumps(rlm_metrics, indent=2)
     )
-    (output_dir / f"baseline_{repo_name}_{timestamp}_metrics.json").write_text(
+    (output_dir / f"{baseline_prefix}_{repo_name}_{timestamp}_metrics.json").write_text(
         json.dumps(baseline_metrics, indent=2)
     )
 
@@ -260,9 +291,21 @@ def cmd_cache(args):
         print(f"Cleared {deleted} cached entries.")
 
 
+def cmd_list_domains(args):
+    """List available analysis domains."""
+    from .domains import DOMAIN_REGISTRY, DEFAULT_DOMAIN
+
+    print("Available analysis domains:\n")
+    for name, config in DOMAIN_REGISTRY.items():
+        default_marker = " (default)" if name == DEFAULT_DOMAIN else ""
+        print(f"  {name}{default_marker}")
+        print(f"    {config.description}")
+        print()
+
+
 def main():
     parser = argparse.ArgumentParser(
-        description="deeprepo — Deep codebase intelligence powered by recursive multi-model orchestration"
+        description="deeprepo — Deep intelligence powered by recursive multi-model orchestration"
     )
     parser.add_argument(
         "--version", action="version", version=f"deeprepo {__version__}"
@@ -271,9 +314,14 @@ def main():
 
     # Common arguments
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("path", help="Path to codebase or git URL")
+    common.add_argument("path", help="Path to data directory or git URL")
     common.add_argument("-o", "--output-dir", default="outputs", help="Output directory")
     common.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output")
+    common.add_argument(
+        "--domain",
+        default="code",
+        help="Analysis domain (default: code). Use 'list-domains' to see options.",
+    )
     common.add_argument(
         "--root-model",
         default="sonnet",
@@ -319,6 +367,10 @@ def main():
     cache_sub.add_parser("stats", help="Show cache statistics")
     cache_sub.add_parser("clear", help="Clear all cached results")
     p_cache.set_defaults(func=cmd_cache)
+
+    # list-domains command
+    p_list_domains = subparsers.add_parser("list-domains", help="List available analysis domains")
+    p_list_domains.set_defaults(func=cmd_list_domains)
 
     args = parser.parse_args()
 
