@@ -1,6 +1,6 @@
-# deeprepo — deep codebase analysis via recursive LLM orchestration
+# deeprepo — recursive LLM orchestration across domains
 
-Context windows can't fit large codebases — and even when they can, quality degrades as input grows. deeprepo works around this with a root LLM that operates in a Python REPL loop, exploring your codebase as structured data and dispatching focused analysis tasks to cheap sub-LLM workers, rather than trying to cram everything into a single prompt. On FastAPI (47 files), a $0.46 Sonnet RLM achieved 100% file coverage where a $0.99 Opus single-call baseline reached only 89% — missing FastAPI's core application class, routing engine, and dependency injection system entirely. [Full benchmarks →](BENCHMARK_RESULTS.md)
+Large inputs defeat single-prompt LLMs — context windows overflow, and quality degrades well before that. deeprepo fixes this with a root LLM that operates in a Python REPL loop, exploring your data as structured files and dispatching focused tasks to cheap sub-LLM workers. Code analysis is the flagship domain: on FastAPI (47 files), a $0.46 Sonnet RLM achieved 100% file coverage where a $0.99 Opus single-call baseline reached only 89% — missing FastAPI's core application class, routing engine, and dependency injection system entirely. The same engine now supports pluggable domains, with content analysis shipping as the second vertical. [Full benchmarks →](BENCHMARK_RESULTS.md)
 
 ## How It Works
 
@@ -28,6 +28,8 @@ Context windows can't fit large codebases — and even when they can, quality de
 ```
 
 The root model writes code, we execute it, feed back the output, and it writes more code — looping until it sets `answer["ready"] = True`. Sub-LLM calls happen inside the REPL code, so the root model's context stays clean. This implements the [Recursive Language Model](https://arxiv.org/abs/2512.24601) pattern from MIT research, extended with [Prime Intellect's](https://www.primeintellect.ai/blog/rlm) parallel dispatch and iterative answer refinement.
+
+**Domain plugins** make this architecture reusable beyond code. Each domain provides its own loader, prompts, and metadata — the RLM engine stays the same. Code analysis ships built-in, content analysis is the second vertical, and more domains are on the way.
 
 ## Results
 
@@ -75,23 +77,29 @@ cp .env.example .env
 Use `python -m deeprepo.cli` or the `deeprepo` entry point after `pip install -e .`.
 
 ```bash
-# Analyze a GitHub repo
-python -m deeprepo.cli analyze https://github.com/tiangolo/fastapi
+# Analyze a GitHub repo (code analysis, default)
+deeprepo analyze https://github.com/tiangolo/fastapi
 
 # Analyze a local directory
-python -m deeprepo.cli analyze ./my-project
+deeprepo analyze ./my-project
+
+# Use a different domain
+deeprepo analyze ./my-content --domain content
+
+# List available domains
+deeprepo list-domains
 
 # Run single-model baseline for comparison
-python -m deeprepo.cli baseline ./my-project
+deeprepo baseline ./my-project
 
 # Compare RLM vs baseline (split-model: Sonnet RLM vs Opus baseline)
-python -m deeprepo.cli compare https://github.com/tiangolo/fastapi --baseline-model opus
+deeprepo compare https://github.com/tiangolo/fastapi --baseline-model opus
 
 # Quiet mode (no progress output)
-python -m deeprepo.cli analyze ./my-project -q
+deeprepo analyze ./my-project -q
 
 # Save to specific directory
-python -m deeprepo.cli analyze ./my-project -o ./reports
+deeprepo analyze ./my-project -o ./reports
 ```
 
 ### Output
@@ -106,13 +114,13 @@ By default, the tool uses **Claude Sonnet 4.5** (`claude-sonnet-4-5-20250929`) a
 
 ```bash
 # Use Opus for maximum quality (more expensive)
-python -m deeprepo.cli analyze ./my-project --root-model opus
+deeprepo analyze ./my-project --root-model opus
 
 # Use a specific model string directly
-python -m deeprepo.cli analyze ./my-project --root-model claude-opus-4-6
+deeprepo analyze ./my-project --root-model claude-opus-4-6
 
 # Adjust max REPL turns (default: 15)
-python -m deeprepo.cli analyze ./my-project --max-turns 20
+deeprepo analyze ./my-project --max-turns 20
 ```
 
 ### Cost Estimates
@@ -140,20 +148,34 @@ deeprepo/
 │   ├── __init__.py
 │   ├── llm_clients.py      # Anthropic + OpenRouter API wrappers with token tracking
 │   ├── codebase_loader.py   # Git clone → structured file tree + metadata
+│   ├── content_loader.py    # Local directory → document tree + metadata
 │   ├── rlm_scaffold.py      # Core engine: REPL loop + sub-LLM dispatch
 │   ├── prompts.py           # System prompts for root model + sub-LLMs
 │   ├── baseline.py          # Single-model baseline for comparison
-│   └── cli.py               # CLI entry point
+│   ├── cache.py             # Content-hash cache for sub-LLM results
+│   ├── utils.py             # Shared utilities
+│   ├── cli.py               # CLI entry point
+│   └── domains/             # Pluggable domain configs
+│       ├── __init__.py      # Domain registry
+│       ├── base.py          # DomainConfig dataclass
+│       ├── code.py          # Code analysis domain
+│       └── content.py       # Content analysis domain
 ├── outputs/                  # Analysis reports land here
-├── examples/                 # Example outputs from real repos
-└── tests/
-    ├── test_small/           # 3-file test codebase with planted bugs
-    └── test_integration.py
+├── examples/
+│   ├── fastapi/             # Example code analysis outputs
+│   ├── pydantic/            # Example code analysis outputs
+│   └── content-demo/        # Example content analysis inputs
+├── tests/
+│   ├── test_small/          # 3-file test codebase with planted bugs
+│   ├── test_content/        # Test content corpus
+│   └── test_integration.py
+└── archive/                  # Internal development docs
 ```
 
 ## What's Next
 
-- **Re-export scope awareness** — the RLM currently can't distinguish project code from upstream re-exports (e.g., Starlette middleware in FastAPI), leading to misattributed findings.
+- **More domain plugins** — the domain system is built to extend; legal, research, and documentation analysis are candidates for future verticals.
+- **Content analysis refinements** — the content domain shipped as a proof-of-concept; next steps include richer metadata extraction and cross-document relationship mapping.
 - **SWE-bench Verified migration** — adapting output format from markdown reports to git diffs/patches for industry-standard evaluation.
 - **RL training** — closing the Sonnet-Opus behavioral gap (Sonnet satisfices at 9 dispatches vs Opus's 61) through reinforcement learning on delegation behavior.
 
