@@ -127,5 +127,15 @@ This is early-stage research. The architecture works; the open question is wheth
 
 ---
 
+## Film Domain Benchmark (Pending)
+
+The `film` domain (Script Breakdown) is implemented, but benchmark results are not included yet in this document because the operational run requires API keys and a locally provided screenplay file.
+
+To run the benchmark workflow, see:
+- `examples/get-out/README.md` (input acquisition + benchmark commands)
+- `GET_OUT_GROUND_TRUTH.md` (ground truth scoring reference)
+
+---
+
 *Generated from benchmark runs: February 16, 2026*
 *Source data: `examples/fastapi/`, `examples/pydantic/`, `tapi/`, `RESEARCH_JOURNAL.md`*
