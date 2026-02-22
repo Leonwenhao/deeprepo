@@ -1,0 +1,17 @@
+{
+  "mode": "rlm",
+  "domain": "film",
+  "root_model": "claude-sonnet-4-5-20250929",
+  "sub_model": "minimax/minimax-m2.5",
+  "repo": "examples/get-out/get-out-2017.pdf",
+  "turns": 20,
+  "root_calls": 20,
+  "sub_calls": 118,
+  "root_input_tokens": 308511,
+  "root_output_tokens": 13038,
+  "sub_input_tokens": 101203,
+  "sub_output_tokens": 70561,
+  "root_cost": 1.121103,
+  "sub_cost": 0.0978577,
+  "total_cost": 1.2189607
+}

@@ -285,9 +285,23 @@ def extract_elements_from_output(text: str, category: str) -> list[str]:
             stripped.startswith("#")
             or stripped.startswith("**")
             or stripped.endswith(":")
+            or stripped.startswith("SECTION")
+            or stripped.startswith("MASTER")
+            or (stripped == stripped.upper() and len(stripped) > 3 and any(c.isalpha() for c in stripped))
         )
 
         if re.search(pattern, stripped, re.IGNORECASE) and is_heading_like:
+            # Check for inline values on the same line (e.g., "**Cast:** Name1, Name2")
+            if ":" in stripped:
+                after_colon = stripped.split(":", 1)[1].strip()
+                after_colon = re.sub(r"\*\*", "", after_colon).strip()
+                if after_colon and after_colon.lower() != "none" and after_colon.lower() != "standard":
+                    for part in re.split(r",\s*", after_colon):
+                        part = part.strip()
+                        # Strip parenthetical notes
+                        part = re.sub(r"\s*\([^)]*\)", "", part).strip()
+                        if part and len(part) > 1 and part.lower() != "none":
+                            items.append(part)
             in_section = True
             continue
 
@@ -295,6 +309,21 @@ def extract_elements_from_output(text: str, category: str) -> list[str]:
             # New section-like line, stop this category block.
             in_section = False
             continue
+
+        # Inline "Key: value" lines work regardless of in_section state.
+        # Handles scene-by-scene formats: "Cast: Name1, Name2", "VFX: effect".
+        if ":" in stripped and not stripped.startswith("```"):
+            key, val = stripped.split(":", 1)
+            if re.search(pattern, key, re.IGNORECASE):
+                candidate = val.strip()
+                candidate = re.sub(r"\*\*", "", candidate).strip()
+                if candidate and candidate.lower() not in {"none", "standard", "n/a"}:
+                    for part in re.split(r"[;,]", candidate):
+                        part = part.strip()
+                        part = re.sub(r"\s*\([^)]*\)", "", part).strip()
+                        if part and len(part) > 1 and part.lower() not in {"none", "standard", "n/a", "same as above"}:
+                            items.append(part)
+                continue
 
         if not in_section:
             continue
@@ -308,24 +337,41 @@ def extract_elements_from_output(text: str, category: str) -> list[str]:
                     items.append(val)
             continue
 
-        # Bulleted and numbered list items.
+        # Bulleted and numbered list items (including indented • bullets).
         bullet_match = re.match(r"^[\s]*[-*•]\s+(.+)$", line)
         if not bullet_match:
             bullet_match = re.match(r"^[\s]*\d+\.\s+(.+)$", line)
         if bullet_match:
             item = bullet_match.group(1).strip()
-            item = re.split(r"\s*[—-:]\s*", item, maxsplit=1)[0].strip()
+            item = re.sub(r"\s*\(SC-[\d,\s\-SC]+\)\s*$", "", item).strip()
+            item = re.split(r"\s*(?:—|-|:)\s*", item, maxsplit=1)[0].strip()
             if item and len(item) > 2 and item.lower() != "none":
                 items.append(item)
             continue
 
-        # Also accept inline "Key: value" lines in structured templates.
-        if ":" in stripped and not stripped.startswith("```"):
-            key, val = stripped.split(":", 1)
-            if re.search(pattern, key, re.IGNORECASE):
-                candidate = val.strip()
-                if candidate and candidate.lower() != "none":
-                    items.append(candidate)
+        # Standalone non-indented lines in a section (e.g., bare character names)
+        _skip_standalone = (
+            not stripped
+            or line.startswith(" ")
+            or line.startswith("\t")
+            or len(stripped) <= 1
+            or len(stripped) >= 60
+            or stripped.startswith("=")
+            or stripped.startswith("-")
+            or stripped.lower() == "none"
+            or re.fullmatch(r"\d+", stripped)  # bare numbers
+            or stripped.upper().startswith("SECTION")
+            or stripped.upper().startswith("MASTER")
+            or stripped.upper().startswith("HERO ")
+            or stripped.upper().startswith("BACKGROUND ")
+            or stripped.upper().startswith("TOTAL ")
+            or re.match(r"^\d+ scene\(s\)", stripped)
+            or stripped.startswith("SC-")
+            or stripped.startswith("INT.")
+            or stripped.startswith("EXT.")
+        )
+        if not _skip_standalone:
+            items.append(stripped)
 
     return _dedupe_preserve_order(items)
 

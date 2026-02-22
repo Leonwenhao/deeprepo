@@ -129,6 +129,7 @@ class RLMEngine:
         user_prompt = domain.user_prompt_template.format(
             metadata_str=metadata_str,
             file_tree=file_tree,
+            **metadata,
         )
 
         # 4. Run the REPL loop
@@ -247,7 +248,18 @@ class RLMEngine:
                 if self.verbose:
                     print("Using partial answer from answer[\"content\"]")
             else:
-                answer["content"] = "[Analysis incomplete — max turns reached]"
+                # Try to salvage content from REPL namespace variables
+                for var_name in ("report", "final_report", "output", "result", "breakdown"):
+                    val = repl_namespace.get(var_name)
+                    if val and isinstance(val, (str, list)):
+                        salvaged = "\n".join(val) if isinstance(val, list) else val
+                        if len(salvaged) > 100:
+                            answer["content"] = salvaged
+                            if self.verbose:
+                                print(f"Salvaged {len(salvaged)} chars from REPL variable '{var_name}'")
+                            break
+                if not answer["content"]:
+                    answer["content"] = "[Analysis incomplete — max turns reached]"
 
         return {
             "analysis": answer["content"],
@@ -563,18 +575,15 @@ class RLMEngine:
             # Anthropic — serialize content blocks to dicts
             content_blocks = []
             for block in response.content:
-                if hasattr(block, "model_dump"):
-                    content_blocks.append(block.model_dump())
-                else:
-                    if block.type == "text":
-                        content_blocks.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        })
+                if block.type == "text":
+                    content_blocks.append({"type": "text", "text": block.text})
+                elif block.type == "tool_use":
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    })
             messages.append({"role": "assistant", "content": content_blocks})
             return
 

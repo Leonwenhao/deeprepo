@@ -16,6 +16,7 @@ Thumbs.db
 *.swp
 *.log
 # Copyrighted screenplay files (not committed)
+examples/*.pdf
 examples/get-out/*.pdf
 examples/get-out/*.txt
 !examples/get-out/README.md

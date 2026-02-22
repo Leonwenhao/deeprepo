@@ -1,0 +1,13 @@
+{
+  "mode": "baseline",
+  "domain": "film",
+  "repo": "examples/get-out/get-out-2017.pdf",
+  "included_files": 118,
+  "excluded_files": 0,
+  "prompt_chars": 113105,
+  "elapsed_seconds": 250.9903872013092,
+  "root_input_tokens": 36820,
+  "root_output_tokens": 16384,
+  "root_cost": 1.7811,
+  "total_cost": 1.7811
+}
