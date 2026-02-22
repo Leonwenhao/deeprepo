@@ -61,8 +61,8 @@ def run_baseline(
         p = Path(codebase_path)
         if not p.exists():
             raise FileNotFoundError(f"Path not found: {codebase_path}")
-        if not p.is_dir():
-            raise ValueError(f"Path is not a directory: {codebase_path}")
+        if not p.is_file() and not p.is_dir():
+            raise ValueError(f"Path is not a file or directory: {codebase_path}")
 
     # Handle git URLs
     if codebase_path.startswith(("http://", "https://", "git@")):

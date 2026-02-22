@@ -1,10 +1,12 @@
 from .base import DomainConfig
 from .code import CODE_DOMAIN
 from .content import CONTENT_DOMAIN
+from .film import FILM_DOMAIN
 
 DOMAIN_REGISTRY: dict[str, DomainConfig] = {
     "code": CODE_DOMAIN,
     "content": CONTENT_DOMAIN,
+    "film": FILM_DOMAIN,
 }
 
 DEFAULT_DOMAIN = "code"

@@ -1,6 +1,6 @@
 # deeprepo — recursive LLM orchestration across domains
 
-Large inputs defeat single-prompt LLMs — context windows overflow, and quality degrades well before that. deeprepo fixes this with a root LLM that operates in a Python REPL loop, exploring your data as structured files and dispatching focused tasks to cheap sub-LLM workers. Code analysis is the flagship domain: on FastAPI (47 files), a $0.46 Sonnet RLM achieved 100% file coverage where a $0.99 Opus single-call baseline reached only 89% — missing FastAPI's core application class, routing engine, and dependency injection system entirely. The same engine now supports pluggable domains, with content analysis shipping as the second vertical. [Full benchmarks →](BENCHMARK_RESULTS.md)
+Large inputs defeat single-prompt LLMs — context windows overflow, and quality degrades well before that. deeprepo fixes this with a root LLM that operates in a Python REPL loop, exploring your data as structured files and dispatching focused tasks to cheap sub-LLM workers. Code analysis is the flagship domain: on FastAPI (47 files), a $0.46 Sonnet RLM achieved 100% file coverage where a $0.99 Opus single-call baseline reached only 89% — missing FastAPI's core application class, routing engine, and dependency injection system entirely. The same engine now supports pluggable domains, with content analysis shipping as the second vertical and film script breakdown shipping as the third vertical. [Full benchmarks →](BENCHMARK_RESULTS.md)
 
 ## How It Works
 
@@ -29,7 +29,7 @@ Large inputs defeat single-prompt LLMs — context windows overflow, and quality
 
 The root model writes code, we execute it, feed back the output, and it writes more code — looping until it sets `answer["ready"] = True`. Sub-LLM calls happen inside the REPL code, so the root model's context stays clean. This implements the [Recursive Language Model](https://arxiv.org/abs/2512.24601) pattern from MIT research, extended with [Prime Intellect's](https://www.primeintellect.ai/blog/rlm) parallel dispatch and iterative answer refinement.
 
-**Domain plugins** make this architecture reusable beyond code. Each domain provides its own loader, prompts, and metadata — the RLM engine stays the same. Code analysis ships built-in, content analysis is the second vertical, and more domains are on the way.
+**Domain plugins** make this architecture reusable beyond code. Each domain provides its own loader, prompts, and metadata — the RLM engine stays the same. Code analysis ships built-in, content analysis is the second vertical, film script breakdown is the third vertical, and more domains are on the way.
 
 ## Results
 
@@ -86,6 +86,9 @@ deeprepo analyze ./my-project
 # Use a different domain
 deeprepo analyze ./my-content --domain content
 
+# Film domain (single screenplay file: .pdf, .txt, or .fountain)
+deeprepo analyze screenplay.pdf --domain film
+
 # List available domains
 deeprepo list-domains
 
@@ -101,6 +104,14 @@ deeprepo analyze ./my-project -q
 # Save to specific directory
 deeprepo analyze ./my-project -o ./reports
 ```
+
+### Available Domains
+
+- `code` — Codebase Analysis (directory input)
+- `content` — Content Intelligence (directory input)
+- `film` — Script Breakdown: screenplay production breakdown that extracts cast, locations, props, VFX, and production elements per scene (single screenplay file input: PDF/TXT/Fountain)
+
+Film benchmark setup is available in `examples/get-out/` (screenplay file not included in the repo).
 
 ### Output
 
@@ -149,6 +160,7 @@ deeprepo/
 │   ├── llm_clients.py      # Anthropic + OpenRouter API wrappers with token tracking
 │   ├── codebase_loader.py   # Git clone → structured file tree + metadata
 │   ├── content_loader.py    # Local directory → document tree + metadata
+│   ├── film_loader.py       # Screenplay file → scene tree + metadata
 │   ├── rlm_scaffold.py      # Core engine: REPL loop + sub-LLM dispatch
 │   ├── prompts.py           # System prompts for root model + sub-LLMs
 │   ├── baseline.py          # Single-model baseline for comparison
@@ -159,12 +171,14 @@ deeprepo/
 │       ├── __init__.py      # Domain registry
 │       ├── base.py          # DomainConfig dataclass
 │       ├── code.py          # Code analysis domain
-│       └── content.py       # Content analysis domain
+│       ├── content.py       # Content analysis domain
+│       └── film.py          # Script breakdown domain
 ├── outputs/                  # Analysis reports land here
 ├── examples/
 │   ├── fastapi/             # Example code analysis outputs
 │   ├── pydantic/            # Example code analysis outputs
-│   └── content-demo/        # Example content analysis inputs
+│   ├── content-demo/        # Example content analysis inputs
+│   └── get-out/             # Film benchmark instructions and outputs
 ├── tests/
 │   ├── test_small/          # 3-file test codebase with planted bugs
 │   ├── test_content/        # Test content corpus
