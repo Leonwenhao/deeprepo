@@ -15,10 +15,11 @@ from . import terminal_ui as ui
 
 ROOT_MODEL_MAP = {
     "opus": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-5-20250929",
+    "sonnet": "claude-sonnet-4-6",
     "minimax": "minimax/minimax-m2.5",
     "anthropic/claude-opus-4-6": "claude-opus-4-6",
-    "anthropic/claude-sonnet-4-5": "claude-sonnet-4-5-20250929",
+    "anthropic/claude-sonnet-4-6": "claude-sonnet-4-6",
+    "anthropic/claude-sonnet-4-5": "claude-sonnet-4-6",
 }
 
 

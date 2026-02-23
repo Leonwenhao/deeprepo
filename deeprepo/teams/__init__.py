@@ -26,7 +26,7 @@ ANALYST_TEAM = TeamConfig(
     agents=[
         AgentConfig(
             role="orchestrator",
-            model="anthropic/claude-sonnet-4-5",
+            model="anthropic/claude-sonnet-4-6",
             description="Root model for RLM orchestration",
         ),
     ],

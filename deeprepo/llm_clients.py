@@ -21,7 +21,7 @@ from deeprepo.utils import async_retry_with_backoff, retry_with_backoff
 # Root model pricing profiles (per million tokens)
 ROOT_MODEL_PRICING = {
     "claude-opus-4-6": {"input": 15.0, "output": 75.0, "label": "Opus 4.6"},
-    "claude-sonnet-4-5-20250929": {"input": 3.0, "output": 15.0, "label": "Sonnet 4.5"},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "label": "Sonnet 4.6"},
     "minimax/minimax-m2.5": {"input": 0.20, "output": 1.10, "label": "MiniMax M2.5"},
 }
 

@@ -27,7 +27,7 @@ except Exception:  # pragma: no cover - environment-specific import issue
 # Map short names to model strings
 ROOT_MODEL_MAP = {
     "opus": "claude-opus-4-6",
-    "sonnet": "claude-sonnet-4-5-20250929",
+    "sonnet": "claude-sonnet-4-6",
     "minimax": "minimax/minimax-m2.5",
 }
 

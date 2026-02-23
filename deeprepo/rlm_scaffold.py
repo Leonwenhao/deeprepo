@@ -826,7 +826,7 @@ def run_analysis(
         codebase_path: Local path to the codebase (or git URL)
         verbose: Print progress to stderr
         max_turns: Maximum REPL iterations
-        root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-6-20250514")
+        root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-6")
         sub_model: OpenRouter model string for sub-LLM file analysis workers
         use_cache: Enable sub-LLM response cache for repeated prompts
         domain: Domain name from registry (default: "code")

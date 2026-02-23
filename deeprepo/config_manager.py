@@ -12,7 +12,7 @@ class ProjectConfig:
     """User-editable project preferences from config.yaml."""
 
     version: int = 1
-    root_model: str = "anthropic/claude-sonnet-4-5"
+    root_model: str = "anthropic/claude-sonnet-4-6"
     sub_model: str = "minimax/minimax-m2.5"
     max_turns: int = 10
     cost_limit: float = 2.00

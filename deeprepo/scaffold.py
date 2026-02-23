@@ -161,7 +161,7 @@ class ProjectScaffolder:
         model = (
             self.team.agents[0].model
             if self.team.agents
-            else "anthropic/claude-sonnet-4-5"
+            else "anthropic/claude-sonnet-4-6"
         )
 
         client = openai.OpenAI(
