@@ -564,7 +564,8 @@ class RLMEngine:
             content_blocks = []
             for block in response.content:
                 if hasattr(block, "model_dump"):
-                    content_blocks.append(block.model_dump())
+                    exclude = getattr(block, "__api_exclude__", None)
+                    content_blocks.append(block.model_dump(exclude=exclude))
                 else:
                     if block.type == "text":
                         content_blocks.append({"type": "text", "text": block.text})
