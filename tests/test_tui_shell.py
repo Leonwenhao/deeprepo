@@ -99,3 +99,11 @@ def test_display_result_prints_help_text(capsys):
     captured = capsys.readouterr()
     assert "Available commands" in captured.out
     assert "/help" in captured.out
+
+
+def test_should_exit_flag_set_by_exit_command():
+    """Exit status from slash command sets shell exit flag."""
+    shell = DeepRepoShell(".")
+    shell.router.route = lambda _text: {"status": "exit", "message": "Goodbye.", "data": {}}
+    shell._handle_slash_command("/quit")
+    assert shell._should_exit is True

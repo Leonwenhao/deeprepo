@@ -3,11 +3,11 @@
 import sys
 
 
-def test_version_is_0_2_0():
-    """Package version was bumped to 0.2.0."""
+def test_version_is_0_2_1():
+    """Package version was bumped to 0.2.1."""
     import deeprepo
 
-    assert deeprepo.__version__ == "0.2.0"
+    assert deeprepo.__version__ == "0.2.1"
 
 
 def test_no_args_launches_tui(monkeypatch):

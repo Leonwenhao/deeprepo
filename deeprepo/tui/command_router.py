@@ -2,6 +2,7 @@
 
 import argparse
 import shlex
+from pathlib import Path
 
 
 class CommandRouter:
@@ -63,6 +64,8 @@ class CommandRouter:
                 "handler": self._do_team,
                 "help": "Switch team configuration (coming soon)",
             },
+            "quit": {"handler": self._do_quit, "help": "Exit deeprepo"},
+            "exit": {"handler": self._do_exit, "help": "Exit deeprepo"},
         }
 
     def _do_help(self, tokens: list[str]) -> dict:
@@ -83,7 +86,13 @@ class CommandRouter:
     def _do_init(self, tokens: list[str]) -> dict:
         from deeprepo.cli_commands import cmd_init
 
-        force = "--force" in tokens
+        deeprepo_dir = Path(self.project_path) / ".deeprepo"
+        project_md = deeprepo_dir / "PROJECT.md"
+
+        # Auto-force initialization when .deeprepo exists but PROJECT.md is missing.
+        explicit_force = "--force" in tokens
+        auto_force = deeprepo_dir.is_dir() and not project_md.is_file()
+        force = explicit_force or auto_force
         args = argparse.Namespace(
             path=self.project_path,
             force=force,
@@ -168,3 +177,11 @@ class CommandRouter:
     def _do_team(self, tokens: list[str]) -> dict:
         del tokens
         return {"status": "info", "message": "Team switching coming soon", "data": {}}
+
+    def _do_quit(self, tokens: list[str]) -> dict:
+        del tokens
+        return {"status": "exit", "message": "Goodbye.", "data": {}}
+
+    def _do_exit(self, tokens: list[str]) -> dict:
+        del tokens
+        return {"status": "exit", "message": "Goodbye.", "data": {}}

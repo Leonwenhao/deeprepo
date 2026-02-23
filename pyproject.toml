@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deeprepo-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "AI project memory for coding tools. Eliminates the cold start tax in every AI session."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -28,10 +28,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "prompt_toolkit>=3.0.0",
     "pyperclip>=1.8.0",
+    "rich>=13.0",
 ]
-
-[project.optional-dependencies]
-ui = ["rich>=13.0"]
 
 [project.urls]
 Homepage = "https://github.com/Leonwenhao/deeprepo"

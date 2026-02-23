@@ -2,17 +2,21 @@
 
 
 def test_command_list_has_all_commands():
-    """COMMAND_LIST includes all slash commands plus exit/quit."""
+    """COMMAND_LIST includes all slash commands plus /exit and /quit."""
     from deeprepo.tui.completions import COMMAND_LIST
 
     assert "/init" in COMMAND_LIST
+    assert "/init --force" in COMMAND_LIST
     assert "/context" in COMMAND_LIST
     assert "/status" in COMMAND_LIST
     assert "/log" in COMMAND_LIST
     assert "/refresh" in COMMAND_LIST
+    assert "/refresh --full" in COMMAND_LIST
     assert "/help" in COMMAND_LIST
-    assert "exit" in COMMAND_LIST
-    assert "quit" in COMMAND_LIST
+    assert "/exit" in COMMAND_LIST
+    assert "/quit" in COMMAND_LIST
+    assert "exit" not in COMMAND_LIST
+    assert "quit" not in COMMAND_LIST
 
 
 def test_build_completer_returns_word_completer():
@@ -70,3 +74,13 @@ def test_welcome_banner_includes_version(tmp_path, capsys):
     shell._print_welcome()
     captured = capsys.readouterr()
     assert "deeprepo v" in captured.out
+
+
+def test_welcome_banner_includes_ascii_art(tmp_path, capsys):
+    """Welcome banner shows recognizable ASCII art logo content."""
+    from deeprepo.tui.shell import DeepRepoShell
+
+    shell = DeepRepoShell(str(tmp_path))
+    shell._print_welcome()
+    captured = capsys.readouterr()
+    assert "___" in captured.out or "|_|" in captured.out or "/ _ \\" in captured.out

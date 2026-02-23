@@ -181,3 +181,66 @@ def test_route_handler_exception_returns_error():
 
     assert result["status"] == "error"
     assert "Command failed: boom" in result["message"]
+
+
+def test_route_quit_returns_exit_status():
+    """`/quit` returns exit status for shell loop termination."""
+    router = CommandRouter(".")
+    result = router.route("/quit")
+    assert result["status"] == "exit"
+    assert result["message"] == "Goodbye."
+
+
+def test_route_exit_returns_exit_status():
+    """`/exit` returns exit status for shell loop termination."""
+    router = CommandRouter(".")
+    result = router.route("/exit")
+    assert result["status"] == "exit"
+    assert result["message"] == "Goodbye."
+
+
+def test_route_init_auto_forces_when_project_md_missing(tmp_path, monkeypatch):
+    """Auto-force `/init` when .deeprepo exists but PROJECT.md is missing."""
+    captured = {}
+
+    def fake_cmd_init(args, *, quiet=False):
+        captured["path"] = args.path
+        captured["force"] = args.force
+        captured["quiet_arg"] = args.quiet
+        captured["quiet_kw"] = quiet
+        return {"status": "success", "message": "init ok", "data": {}}
+
+    monkeypatch.setattr(cli_commands, "cmd_init", fake_cmd_init)
+
+    deeprepo_dir = tmp_path / ".deeprepo"
+    deeprepo_dir.mkdir(parents=True)
+
+    router = CommandRouter(str(tmp_path))
+    result = router.route("/init")
+
+    assert result["status"] == "success"
+    assert captured["path"] == str(tmp_path)
+    assert captured["force"] is True
+    assert captured["quiet_arg"] is True
+    assert captured["quiet_kw"] is True
+
+
+def test_route_init_requires_force_when_project_md_exists(tmp_path, monkeypatch):
+    """Do not auto-force `/init` when PROJECT.md exists unless --force is passed."""
+    captured = {}
+
+    def fake_cmd_init(args, *, quiet=False):
+        captured["force"] = args.force
+        return {"status": "success", "message": "init ok", "data": {}}
+
+    monkeypatch.setattr(cli_commands, "cmd_init", fake_cmd_init)
+
+    deeprepo_dir = tmp_path / ".deeprepo"
+    deeprepo_dir.mkdir(parents=True)
+    (deeprepo_dir / "PROJECT.md").write_text("# Project\n", encoding="utf-8")
+
+    router = CommandRouter(str(tmp_path))
+    result = router.route("/init")
+
+    assert result["status"] == "success"
+    assert captured["force"] is False

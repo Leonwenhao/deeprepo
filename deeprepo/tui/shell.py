@@ -1,11 +1,14 @@
 """Interactive TUI shell for deeprepo."""
 
 import os
+import re
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
+from rich.console import Console
+from rich.panel import Panel
 
 from deeprepo.tui.command_router import CommandRouter
 from deeprepo.tui.completions import build_completer
@@ -13,14 +16,7 @@ from deeprepo.tui.onboarding import needs_onboarding, run_onboarding
 from deeprepo.tui.prompt_builder import PromptBuilder
 from deeprepo.tui.session_state import SessionState
 
-# Rich is optional — import defensively
-try:
-    from rich.console import Console
-    from rich.panel import Panel
-
-    _console = Console()
-except ImportError:
-    _console = None
+_console = Console()
 
 
 class DeepRepoShell:
@@ -38,6 +34,7 @@ class DeepRepoShell:
         self.prompt_builder = PromptBuilder(self.project_path)
         self.state = SessionState.from_project(self.project_path)
         self.key_bindings = self._build_key_bindings()
+        self._should_exit = False
 
     def run(self):
         """Main loop. Blocks until exit."""
@@ -59,6 +56,8 @@ class DeepRepoShell:
                 if user_input.lower() in ("exit", "quit"):
                     break
                 self._handle_input(user_input)
+                if self._should_exit:
+                    break
             except (EOFError, KeyboardInterrupt):
                 break
         self._print_goodbye()
@@ -73,6 +72,9 @@ class DeepRepoShell:
     def _handle_slash_command(self, text: str):
         """Route slash command through CommandRouter and display result."""
         result = self.router.route(text)
+        if result.get("status") == "exit":
+            self._should_exit = True
+            return
         self._display_result(result)
 
         cmd_text = text.lstrip("/")
@@ -89,17 +91,16 @@ class DeepRepoShell:
             self.state.record_prompt(text, result["data"].get("prompt", ""))
 
     def _display_result(self, result: dict):
-        """Display a command result dict using Rich panels or plain text."""
+        """Display a command result dict with Rich styling."""
         status = result.get("status", "info")
         message = result.get("message", "")
         data = result.get("data", {})
 
-        if _console is not None:
+        try:
             if status == "error":
                 _console.print(
                     Panel(
-                        f"[red]{message}[/red]",
-                        title="Error",
+                        f"[bold red]Error:[/bold red] {message}",
                         border_style="red",
                         expand=False,
                     )
@@ -107,18 +108,18 @@ class DeepRepoShell:
             elif status == "success":
                 _console.print(
                     Panel(
-                        message,
-                        title="[green]OK[/green]",
+                        f"[bold green]OK:[/bold green] {message}",
                         border_style="green",
                         expand=False,
                     )
                 )
             else:
-                _console.print(message)
+                _console.print(f"[cyan]{message}[/cyan]")
 
             if "help_text" in data:
-                _console.print(data["help_text"])
-        else:
+                help_text = re.sub(r"(/\w+)", r"[bold cyan]\1[/bold cyan]", data["help_text"])
+                _console.print(help_text)
+        except Exception:
             if status == "error":
                 print(f"Error: {message}")
             elif status == "success":
@@ -181,30 +182,40 @@ class DeepRepoShell:
         else:
             context_line = "Context: Not initialized (run /init)"
 
-        banner_text = (
-            f"  deeprepo v{version}\n"
-            f"  Project: {project_name}\n"
-            f"  {context_line}\n"
-            "  \n"
-            "  Type /help for commands or ask anything."
-        )
+        ascii_lines = [
+            "[bold bright_cyan]     _                                [/bold bright_cyan]",
+            "[bold cyan]  __| | ___  ___ _ __  _ __ ___ _ __   ___[/bold cyan]",
+            "[bold magenta] / _` |/ _ \\/ _ \\ '_ \\| '__/ _ \\ '_ \\ / _ \\[/bold magenta]",
+            "[bold bright_magenta]| (_| |  __/  __/ |_) | | |  __/ |_) | (_) |[/bold bright_magenta]",
+            "[bold purple] \\__,_|\\___|\\___|  __/|_|  \\___|  __/ \\___/[/bold purple]",
+            "[bold bright_cyan]               |_|            |_|[/bold bright_cyan]",
+        ]
+        info_lines = [
+            f"[dim]deeprepo v{version}[/dim]",
+            f"[cyan]Project:[/cyan] {project_name}",
+            f"[dim]{context_line}[/dim]",
+            "[dim]Type /help for commands, /quit to exit, or just ask anything.[/dim]",
+        ]
 
-        if _console is not None:
-            try:
-                _console.print()
-                _console.print(Panel(banner_text, expand=False))
-                _console.print()
-            except Exception:
-                print(banner_text)
-                print()
-        else:
+        try:
             print()
-            print(banner_text)
+            for line in ascii_lines:
+                _console.print(line)
+            _console.print()
+            for line in info_lines:
+                _console.print(line)
+            _console.print()
+        except Exception:
+            print("deeprepo")
+            print(f"deeprepo v{version}")
+            print(f"Project: {project_name}")
+            print(context_line)
+            print("Type /help for commands, /quit to exit, or just ask anything.")
             print()
 
     def _print_goodbye(self):
         """Print exit message."""
-        if _console is not None:
-            _console.print("\n[dim]Goodbye.[/dim]")
-        else:
+        try:
+            _console.print("\n[dim cyan]Goodbye.[/dim cyan]")
+        except Exception:
             print("\nGoodbye.")

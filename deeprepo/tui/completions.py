@@ -5,6 +5,7 @@ from prompt_toolkit.completion import WordCompleter
 
 COMMAND_LIST = [
     "/init",
+    "/init --force",
     "/context",
     "/context --copy",
     "/context --format cursor",
@@ -13,10 +14,11 @@ COMMAND_LIST = [
     "/log add",
     "/log show",
     "/refresh",
+    "/refresh --full",
     "/help",
     "/team",
-    "exit",
-    "quit",
+    "/quit",
+    "/exit",
 ]
 
 

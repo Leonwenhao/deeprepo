@@ -4,10 +4,12 @@ import os
 from pathlib import Path
 
 import yaml
+from rich.console import Console
 
 
 GLOBAL_CONFIG_DIR = Path.home() / ".deeprepo"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.yaml"
+_console = Console()
 
 
 def load_global_api_key() -> str | None:
@@ -103,23 +105,27 @@ def run_onboarding(project_path: str, *, input_fn=None) -> dict:
         return result
 
     if check["needs_api_key"]:
-        print("deeprepo uses OpenRouter for AI model access.")
-        print("Get your key at: https://openrouter.ai/keys")
+        _console.print("[cyan]deeprepo uses OpenRouter for AI model access.[/cyan]")
+        _console.print("[dim]Get your key at: https://openrouter.ai/keys[/dim]")
         api_key = input_fn("Enter your OpenRouter API key (or press Enter to skip): ").strip()
         if api_key:
             save_global_api_key(api_key)
-            print(f"API key saved to ~/.deeprepo/config.yaml ({api_key[:8]}...)")
+            _console.print(
+                f"[green]API key saved to ~/.deeprepo/config.yaml ({api_key[:8]}...).[/green]"
+            )
             result["api_key_configured"] = True
         else:
-            print("Skipped. Commands needing API access won't work until a key is set.")
+            _console.print(
+                "[yellow]Skipped. Commands needing API access won't work until a key is set.[/yellow]"
+            )
             result["api_key_configured"] = False
 
     if check["needs_init"]:
         should_analyze = input_fn("Would you like to analyze this project now? (y/n): ").strip()
         if should_analyze.lower() in {"y", "yes"}:
-            print("Run /init after entering the shell to analyze your project.")
+            _console.print("[cyan]Run /init after entering the shell to analyze your project.[/cyan]")
         else:
-            print("No problem. Run /init when you're ready.")
+            _console.print("[dim]No problem. Run /init when you're ready.[/dim]")
         result["project_initialized"] = False
 
     result["skipped"] = False
