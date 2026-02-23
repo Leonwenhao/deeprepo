@@ -73,7 +73,7 @@ def test_cmd_init_fails_if_already_initialized(sample_project: Path) -> None:
     args = argparse.Namespace(
         path=str(sample_project),
         force=False,
-        quiet=True,
+        quiet=False,
         root_model=None,
         sub_model=None,
         max_turns=None,
@@ -81,6 +81,28 @@ def test_cmd_init_fails_if_already_initialized(sample_project: Path) -> None:
 
     with pytest.raises(SystemExit):
         cmd_init(args)
+
+
+def test_cmd_init_returns_error_dict_when_quiet(sample_project: Path) -> None:
+    """cmd_init returns an error dict in quiet mode when already initialized."""
+    from deeprepo.cli_commands import cmd_init
+
+    cm = ConfigManager(str(sample_project))
+    cm.initialize()
+
+    args = argparse.Namespace(
+        path=str(sample_project),
+        force=False,
+        quiet=True,
+        root_model=None,
+        sub_model=None,
+        max_turns=None,
+    )
+
+    result = cmd_init(args)
+    assert result["status"] == "error"
+    assert "already exists" in result["message"]
+    assert "data" in result
 
 
 def test_cmd_context_outputs_cold_start(sample_project: Path, capsys) -> None:
@@ -164,3 +186,42 @@ def test_cmd_context_fails_if_not_initialized(tmp_path: Path) -> None:
     args = argparse.Namespace(path=str(tmp_path), copy=False, format="markdown")
     with pytest.raises(SystemExit):
         cmd_context(args)
+
+
+def test_cmd_context_quiet_not_initialized_returns_error_dict(tmp_path: Path) -> None:
+    """cmd_context quiet mode returns error dict instead of raising."""
+    from deeprepo.cli_commands import cmd_context
+
+    args = argparse.Namespace(path=str(tmp_path), copy=False, format="markdown")
+    result = cmd_context(args, quiet=True)
+
+    assert result["status"] == "error"
+    assert result["message"] == "No .deeprepo/ directory found"
+    assert result["data"] == {}
+
+
+def test_cmd_status_quiet_returns_structured_data(sample_project: Path) -> None:
+    """cmd_status quiet mode returns status payload with expected keys."""
+    from deeprepo.cli_commands import cmd_status
+
+    cm = ConfigManager(str(sample_project))
+    cm.initialize()
+    (sample_project / ".deeprepo" / "PROJECT.md").write_text(
+        "## Identity\nSample\n",
+        encoding="utf-8",
+    )
+
+    args = argparse.Namespace(path=str(sample_project))
+    result = cmd_status(args, quiet=True)
+
+    assert result["status"] == "success"
+    assert "message" in result
+    assert "data" in result
+    data = result["data"]
+    assert "project_name" in data
+    assert "initialized" in data
+    assert "project_md" in data
+    assert "cold_start" in data
+    assert "session_log" in data
+    assert "scratchpad" in data
+    assert "changes" in data

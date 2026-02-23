@@ -22,7 +22,7 @@ ROOT_MODEL_MAP = {
 }
 
 
-def cmd_init(args):
+def cmd_init(args, *, quiet=None):
     """Run context domain analysis and generate .deeprepo/ directory."""
     from .config_manager import ConfigManager, ProjectConfig
     from .context_generator import ContextGenerator
@@ -30,15 +30,21 @@ def cmd_init(args):
 
     project_path = getattr(args, "path", ".") or "."
     project_path = str(Path(project_path).resolve())
-    quiet = getattr(args, "quiet", False)
+    quiet = quiet if quiet is not None else getattr(args, "quiet", False)
     force = getattr(args, "force", False)
 
     cm = ConfigManager(project_path)
     if cm.is_initialized():
         if not force:
-            ui.print_error(f".deeprepo/ already exists at {cm.deeprepo_dir}")
-            ui.print_msg("Use --force to overwrite.")
-            sys.exit(1)
+            if not quiet:
+                ui.print_error(f".deeprepo/ already exists at {cm.deeprepo_dir}")
+                ui.print_msg("Use --force to overwrite.")
+                sys.exit(1)
+            return {
+                "status": "error",
+                "message": f".deeprepo/ already exists at {cm.deeprepo_dir}",
+                "data": {},
+            }
         shutil.rmtree(cm.deeprepo_dir, ignore_errors=True)
 
     config = ProjectConfig()
@@ -122,16 +128,40 @@ def cmd_init(args):
         ui.print_msg("  deeprepo status           # Check context health")
         ui.print_onboarding()
 
+    return {
+        "status": "success",
+        "message": f"Initialized .deeprepo/ for {config.project_name}",
+        "data": {
+            "project_name": config.project_name,
+            "project_path": project_path,
+            "cost": result["usage"].total_cost,
+            "turns": result["turns"],
+            "sub_dispatches": result["usage"].sub_calls,
+            "generated_files": list(generated_files.values()),
+        },
+    }
 
-def cmd_list_teams(args):
+
+def cmd_list_teams(args, *, quiet=False):
     """List available teams."""
     from .teams import list_teams
 
     teams = list_teams()
     if not teams:
-        ui.print_msg("No teams registered.")
-        return
-    ui.print_team_list(teams)
+        if not quiet:
+            ui.print_msg("No teams registered.")
+        return {
+            "status": "info",
+            "message": "No teams registered",
+            "data": {"teams": []},
+        }
+    if not quiet:
+        ui.print_team_list(teams)
+    return {
+        "status": "success",
+        "message": f"{len(teams)} teams available",
+        "data": {"teams": [team.name for team in teams]},
+    }
 
 
 def cmd_new(args):
@@ -213,7 +243,7 @@ def cmd_new(args):
     ui.print_onboarding()
 
 
-def cmd_context(args):
+def cmd_context(args, *, quiet=False):
     """Output the cold-start prompt. No API call; reads local files."""
     from .config_manager import ConfigManager
     from .context_generator import ContextGenerator
@@ -225,9 +255,15 @@ def cmd_context(args):
 
     cm = ConfigManager(project_path)
     if not cm.is_initialized():
-        ui.print_error("No .deeprepo/ directory found.")
-        ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
-        sys.exit(1)
+        if not quiet:
+            ui.print_error("No .deeprepo/ directory found.")
+            ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
+            sys.exit(1)
+        return {
+            "status": "error",
+            "message": "No .deeprepo/ directory found",
+            "data": {},
+        }
 
     config = cm.load_config()
     generator = ContextGenerator(project_path, config)
@@ -235,31 +271,71 @@ def cmd_context(args):
     try:
         content = generator.update_cold_start()
     except FileNotFoundError as exc:
-        ui.print_error(str(exc))
-        ui.print_msg("Run 'deeprepo init' to generate project context.")
-        sys.exit(1)
+        if not quiet:
+            ui.print_error(str(exc))
+            ui.print_msg("Run 'deeprepo init' to generate project context.")
+            sys.exit(1)
+        return {"status": "error", "message": str(exc), "data": {}}
 
     if fmt == "cursor":
         out_path = Path(project_path) / ".cursorrules"
         out_path.write_text(content, encoding="utf-8")
-        ui.print_msg(f"Wrote .cursorrules to {out_path}")
-        return
+        if not quiet:
+            ui.print_msg(f"Wrote .cursorrules to {out_path}")
+        return {
+            "status": "success",
+            "message": f"Wrote .cursorrules to {out_path}",
+            "data": {"format": "cursor", "path": str(out_path)},
+        }
 
     if copy_flag:
         try:
             _copy_to_clipboard(content)
             token_est = len(content) // 4
-            ui.print_context_copied(token_est)
+            if not quiet:
+                ui.print_context_copied(token_est)
+            return {
+                "status": "success",
+                "message": f"Copied cold-start prompt to clipboard ({token_est} tokens)",
+                "data": {
+                    "format": "markdown",
+                    "token_count": token_est,
+                    "copied": True,
+                    "content": content,
+                },
+            }
         except Exception:
-            ui.print_msg("Could not copy to clipboard. Printing to stdout instead:")
-            ui.print_msg()
-            ui.print_msg(content)
-        return
+            token_est = len(content) // 4
+            if not quiet:
+                ui.print_msg("Could not copy to clipboard. Printing to stdout instead:")
+                ui.print_msg()
+                ui.print_msg(content)
+            return {
+                "status": "success",
+                "message": "Clipboard unavailable, content returned in data",
+                "data": {
+                    "format": "markdown",
+                    "token_count": token_est,
+                    "copied": False,
+                    "content": content,
+                },
+            }
 
-    ui.print_msg(content)
+    if not quiet:
+        ui.print_msg(content)
+    token_est = len(content) // 4
+    return {
+        "status": "success",
+        "message": "Context output",
+        "data": {
+            "format": "markdown",
+            "token_count": token_est,
+            "content": content,
+        },
+    }
 
 
-def cmd_log(args):
+def cmd_log(args, *, quiet=False):
     """Record a session entry or show recent entries."""
     from .config_manager import ConfigManager
     from .context_generator import ContextGenerator
@@ -269,9 +345,15 @@ def cmd_log(args):
 
     cm = ConfigManager(project_path)
     if not cm.is_initialized():
-        ui.print_error("No .deeprepo/ directory found.")
-        ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
-        sys.exit(1)
+        if not quiet:
+            ui.print_error("No .deeprepo/ directory found.")
+            ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
+            sys.exit(1)
+        return {
+            "status": "error",
+            "message": "No .deeprepo/ directory found",
+            "data": {},
+        }
 
     action = getattr(args, "action", None)
     message = getattr(args, "message", None)
@@ -280,18 +362,34 @@ def cmd_log(args):
         count = getattr(args, "count", 5) or 5
         entries = show_log_entries(cm.deeprepo_dir, count)
         if not entries:
-            ui.print_msg("No session log entries yet.")
-            ui.print_msg('Add one: deeprepo log "what you did"')
-            return
-        for entry in entries:
-            ui.print_msg(f"  {entry['timestamp']}  {entry['message']}")
-        return
+            if not quiet:
+                ui.print_msg("No session log entries yet.")
+                ui.print_msg('Add one: deeprepo log "what you did"')
+            return {
+                "status": "info",
+                "message": "No session log entries yet",
+                "data": {"entries": []},
+            }
+        if not quiet:
+            for entry in entries:
+                ui.print_msg(f"  {entry['timestamp']}  {entry['message']}")
+        return {
+            "status": "success",
+            "message": f"{len(entries)} log entries",
+            "data": {"entries": entries},
+        }
 
     log_message = action or message
     if not log_message:
-        ui.print_error("No message provided.")
-        ui.print_msg('Usage: deeprepo log "description of what you did"')
-        sys.exit(1)
+        if not quiet:
+            ui.print_error("No message provided.")
+            ui.print_msg('Usage: deeprepo log "description of what you did"')
+            sys.exit(1)
+        return {
+            "status": "error",
+            "message": "No message provided",
+            "data": {},
+        }
 
     append_log_entry(cm.deeprepo_dir, log_message)
 
@@ -302,7 +400,13 @@ def cmd_log(args):
     except FileNotFoundError:
         pass
 
-    ui.print_msg(f'Logged: "{log_message}"')
+    if not quiet:
+        ui.print_msg(f'Logged: "{log_message}"')
+    return {
+        "status": "success",
+        "message": f'Logged: "{log_message}"',
+        "data": {"entry": log_message},
+    }
 
 
 def append_log_entry(deeprepo_dir: Path, message: str) -> None:
@@ -339,7 +443,7 @@ def show_log_entries(deeprepo_dir: Path, count: int = 5) -> list[dict]:
     return entries[-count:] if len(entries) > count else entries
 
 
-def cmd_status(args):
+def cmd_status(args, *, quiet=False):
     """Show context health at a glance."""
     from .config_manager import ConfigManager
 
@@ -348,93 +452,152 @@ def cmd_status(args):
 
     cm = ConfigManager(project_path)
     if not cm.is_initialized():
-        ui.print_error("No .deeprepo/ directory found.")
-        ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
-        sys.exit(1)
+        if not quiet:
+            ui.print_error("No .deeprepo/ directory found.")
+            ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
+            sys.exit(1)
+        return {
+            "status": "error",
+            "message": "No .deeprepo/ directory found",
+            "data": {"initialized": False},
+        }
 
     config = cm.load_config()
     state = cm.load_state()
 
     project_name = config.project_name or cm.detect_project_name()
-    ui.print_status_header(project_name)
-    ui.print_msg()
+    if not quiet:
+        ui.print_status_header(project_name)
+        ui.print_msg()
 
     project_md = cm.deeprepo_dir / "PROJECT.md"
+    project_md_exists = project_md.is_file()
+    project_md_age_hours = 0.0
+    project_md_stale = False
     if project_md.is_file():
         mtime = project_md.stat().st_mtime
         age_hours = (datetime.now().timestamp() - mtime) / 3600
+        project_md_age_hours = age_hours
+        project_md_stale = age_hours >= config.stale_threshold_hours
         age_str = _format_age(age_hours)
-        if age_hours < config.stale_threshold_hours:
-            ui.print_status_line(
-                "PROJECT.md    ", "[OK]", f"current   (refreshed {age_str} ago)"
-            )
-        else:
-            ui.print_status_line(
-                "PROJECT.md    ", "[!!]", f"stale     (refreshed {age_str} ago)"
-            )
+        if not quiet:
+            if age_hours < config.stale_threshold_hours:
+                ui.print_status_line(
+                    "PROJECT.md    ", "[OK]", f"current   (refreshed {age_str} ago)"
+                )
+            else:
+                ui.print_status_line(
+                    "PROJECT.md    ", "[!!]", f"stale     (refreshed {age_str} ago)"
+                )
     else:
-        ui.print_status_line("PROJECT.md    ", "[X]", "missing    (run deeprepo init)")
+        if not quiet:
+            ui.print_status_line("PROJECT.md    ", "[X]", "missing    (run deeprepo init)")
 
     cold_start = cm.deeprepo_dir / "COLD_START.md"
+    cold_start_exists = cold_start.is_file()
     if cold_start.is_file():
-        ui.print_status_line("COLD_START.md ", "[OK]", "current   (synced)")
+        if not quiet:
+            ui.print_status_line("COLD_START.md ", "[OK]", "current   (synced)")
     else:
-        ui.print_status_line("COLD_START.md ", "[X]", "missing")
+        if not quiet:
+            ui.print_status_line("COLD_START.md ", "[X]", "missing")
 
+    session_log_path = cm.deeprepo_dir / "SESSION_LOG.md"
     entries = show_log_entries(cm.deeprepo_dir, count=999999)
     entry_count = len(entries)
+    last_ts = None
     if entry_count > 0:
         last_ts = entries[-1]["timestamp"]
         suffix = "s" if entry_count != 1 else ""
-        ui.print_status_line(
-            "SESSION_LOG.md",
-            "[OK]",
-            f"{entry_count} session{suffix}  (last: {last_ts})",
-        )
+        if not quiet:
+            ui.print_status_line(
+                "SESSION_LOG.md",
+                "[OK]",
+                f"{entry_count} session{suffix}  (last: {last_ts})",
+            )
     else:
-        ui.print_status_line("SESSION_LOG.md", "[~]", "empty")
+        if not quiet:
+            ui.print_status_line("SESSION_LOG.md", "[~]", "empty")
 
     scratchpad = cm.deeprepo_dir / "SCRATCHPAD.md"
+    scratchpad_exists = scratchpad.is_file()
+    scratchpad_active = False
     if scratchpad.is_file():
         scratchpad_text = scratchpad.read_text(encoding="utf-8")
         if (
             "**Current Task:** None" in scratchpad_text
             or "**Phase:** IDLE" in scratchpad_text
         ):
-            ui.print_status_line(
-                "SCRATCHPAD.md ", "[OK]", "clean     (no active tasks)"
-            )
+            if not quiet:
+                ui.print_status_line(
+                    "SCRATCHPAD.md ", "[OK]", "clean     (no active tasks)"
+                )
         else:
-            ui.print_status_line(
-                "SCRATCHPAD.md ", "[!!]", "active    (has current task)"
-            )
+            scratchpad_active = True
+            if not quiet:
+                ui.print_status_line(
+                    "SCRATCHPAD.md ", "[!!]", "active    (has current task)"
+                )
     else:
-        ui.print_status_line("SCRATCHPAD.md ", "[~]", "missing")
+        if not quiet:
+            ui.print_status_line("SCRATCHPAD.md ", "[~]", "missing")
 
+    changes_data = None
     if state.file_hashes:
         changes = get_changed_files(Path(project_path), state)
+        changes_data = {
+            "modified": len(changes["modified"]),
+            "added": len(changes["added"]),
+            "deleted": len(changes["deleted"]),
+        }
         total_changes = (
             len(changes["modified"]) + len(changes["added"]) + len(changes["deleted"])
         )
-        if total_changes > 0:
-            ui.print_msg()
-            ui.print_msg("  Changed since last refresh:")
-            for filepath in changes["modified"][:10]:
-                ui.print_msg(f"    modified: {filepath}")
-            for filepath in changes["added"][:10]:
-                ui.print_msg(f"    added:    {filepath}")
-            for filepath in changes["deleted"][:10]:
-                ui.print_msg(f"    deleted:  {filepath}")
-            if total_changes > 30:
-                ui.print_msg(f"    ... and {total_changes - 30} more")
-            ui.print_msg()
-            ui.print_msg("  Run `deeprepo refresh` to update context.")
-        else:
-            ui.print_msg()
-            ui.print_msg("  No files changed since last refresh.")
+        if not quiet:
+            if total_changes > 0:
+                ui.print_msg()
+                ui.print_msg("  Changed since last refresh:")
+                for filepath in changes["modified"][:10]:
+                    ui.print_msg(f"    modified: {filepath}")
+                for filepath in changes["added"][:10]:
+                    ui.print_msg(f"    added:    {filepath}")
+                for filepath in changes["deleted"][:10]:
+                    ui.print_msg(f"    deleted:  {filepath}")
+                if total_changes > 30:
+                    ui.print_msg(f"    ... and {total_changes - 30} more")
+                ui.print_msg()
+                ui.print_msg("  Run `deeprepo refresh` to update context.")
+            else:
+                ui.print_msg()
+                ui.print_msg("  No files changed since last refresh.")
+
+    return {
+        "status": "success",
+        "message": f"Project: {project_name}",
+        "data": {
+            "project_name": project_name,
+            "initialized": True,
+            "project_md": {
+                "exists": project_md_exists,
+                "age_hours": project_md_age_hours,
+                "stale": project_md_stale,
+            },
+            "cold_start": {"exists": cold_start_exists},
+            "session_log": {
+                "exists": session_log_path.is_file(),
+                "entry_count": entry_count,
+                "last_timestamp": last_ts,
+            },
+            "scratchpad": {
+                "exists": scratchpad_exists,
+                "active": scratchpad_active,
+            },
+            "changes": changes_data,
+        },
+    }
 
 
-def cmd_refresh(args):
+def cmd_refresh(args, *, quiet=None):
     """Diff-aware or full refresh of project context."""
     from .config_manager import ConfigManager
     from .refresh import RefreshEngine
@@ -442,13 +605,19 @@ def cmd_refresh(args):
     project_path = getattr(args, "path", ".") or "."
     project_path = str(Path(project_path).resolve())
     full = getattr(args, "full", False)
-    quiet = getattr(args, "quiet", False)
+    quiet = quiet if quiet is not None else getattr(args, "quiet", False)
 
     cm = ConfigManager(project_path)
     if not cm.is_initialized():
-        ui.print_error("No .deeprepo/ directory found.")
-        ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
-        sys.exit(1)
+        if not quiet:
+            ui.print_error("No .deeprepo/ directory found.")
+            ui.print_msg(f"Run 'deeprepo init {project_path}' first.")
+            sys.exit(1)
+        return {
+            "status": "error",
+            "message": "No .deeprepo/ directory found",
+            "data": {},
+        }
 
     config = cm.load_config()
     state = cm.load_state()
@@ -464,8 +633,13 @@ def cmd_refresh(args):
             len(changes["modified"]) + len(changes["added"]) + len(changes["deleted"])
         )
         if changed_count == 0:
-            ui.print_msg("Already up to date.")
-            return
+            if not quiet:
+                ui.print_msg("Already up to date.")
+            return {
+                "status": "info",
+                "message": "Already up to date",
+                "data": {"changed_files": 0},
+            }
 
         if not quiet:
             ui.print_msg(f"Found {changed_count} changed file(s):")
@@ -487,6 +661,16 @@ def cmd_refresh(args):
 
     if not quiet:
         ui.print_refresh_complete(result["changed_files"], result["cost"], result["turns"])
+
+    return {
+        "status": "success",
+        "message": f"Refreshed {result['changed_files']} files",
+        "data": {
+            "changed_files": result["changed_files"],
+            "cost": result["cost"],
+            "turns": result["turns"],
+        },
+    }
 
 
 def _parse_stack_string(stack_str: str) -> dict:

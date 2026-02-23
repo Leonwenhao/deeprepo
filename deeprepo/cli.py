@@ -304,12 +304,26 @@ def cmd_list_domains(args):
         print()
 
 
+def _launch_tui(args):
+    """Launch the interactive TUI session."""
+    from deeprepo.tui.shell import DeepRepoShell
+
+    path = getattr(args, "path", ".")
+    shell = DeepRepoShell(path)
+    shell.run()
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="deeprepo — Deep intelligence powered by recursive multi-model orchestration"
     )
     parser.add_argument(
         "--version", action="version", version=f"deeprepo {__version__}"
+    )
+    parser.add_argument(
+        "--no-tui",
+        action="store_true",
+        help="Print help instead of launching interactive TUI when no command is given",
     )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
@@ -376,6 +390,11 @@ def main():
     # teams command
     p_teams = subparsers.add_parser("teams", help="List available teams")
     p_teams.set_defaults(func=cli_commands.cmd_list_teams)
+
+    # tui command (explicit interactive mode)
+    p_tui = subparsers.add_parser("tui", help="Launch interactive TUI session")
+    p_tui.add_argument("path", nargs="?", default=".", help="Project path (default: current directory)")
+    p_tui.set_defaults(func=_launch_tui)
 
     # new command
     p_new = subparsers.add_parser("new", help="Create a new project with AI scaffolding")
@@ -452,8 +471,14 @@ def main():
     args = parser.parse_args()
 
     if not args.command:
-        parser.print_help()
-        sys.exit(1)
+        if args.no_tui:
+            parser.print_help()
+            sys.exit(1)
+        from deeprepo.tui.shell import DeepRepoShell
+
+        shell = DeepRepoShell(".")
+        shell.run()
+        return
 
     try:
         args.func(args)
