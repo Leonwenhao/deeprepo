@@ -13,8 +13,10 @@ This implements the RLM pattern:
 import io
 import json
 import re
+import signal
 import shutil
 import sys
+import threading
 import time
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
@@ -35,6 +37,7 @@ if TYPE_CHECKING:
 MAX_OUTPUT_LENGTH = 8192  # Truncate REPL output to force model to use code
 MAX_TURNS = 15            # Maximum REPL iterations
 DEFAULT_MAX_CONCURRENT = 5  # Max parallel sub-LLM calls
+EXEC_TIMEOUT_SECONDS = 120  # Maximum execution time per code block
 
 EXECUTE_CODE_TOOL = {
     "name": "execute_python",
@@ -170,7 +173,9 @@ class RLMEngine:
                 if answer["ready"]:
                     break
                 # Prompt model to use the tool
-                self._append_assistant_message(messages, response)
+                self._append_assistant_message(
+                    messages, response, strip_tool_use=True
+                )
                 messages.append({
                     "role": "user",
                     "content": (
@@ -192,9 +197,21 @@ class RLMEngine:
                 output = self._execute_code(code, repl_namespace)
                 all_output.append(output)
 
+                if answer["ready"]:
+                    if self.verbose:
+                        skipped = len(code_blocks) - i - 1
+                        print(
+                            f"  Answer marked ready - skipping remaining {skipped} block(s)"
+                        )
+                    break
+
                 if self.verbose:
                     preview = output[:300] + ("..." if len(output) > 300 else "")
                     print(f"  Output: {preview}")
+
+            # Pad outputs so each tool_use receives a corresponding tool_result.
+            while len(all_output) < len(tool_use_info):
+                all_output.append("[Execution skipped: answer already finalized]")
 
             # Combine outputs
             combined_output = "\n".join(all_output)
@@ -230,7 +247,9 @@ class RLMEngine:
                 )
             else:
                 # Text-only path: send as user message (legacy behavior)
-                self._append_assistant_message(messages, response)
+                self._append_assistant_message(
+                    messages, response, strip_tool_use=True
+                )
                 messages.append({
                     "role": "user",
                     "content": (
@@ -553,7 +572,12 @@ class RLMEngine:
             return "\n".join(parts)
         return str(response)
 
-    def _append_assistant_message(self, messages: list[dict], response) -> None:
+    def _append_assistant_message(
+        self,
+        messages: list[dict],
+        response,
+        strip_tool_use: bool = False,
+    ) -> None:
         """Append the assistant's response to the message list."""
         if isinstance(response, str):
             messages.append({"role": "assistant", "content": response})
@@ -565,17 +589,23 @@ class RLMEngine:
             for block in response.content:
                 if hasattr(block, "model_dump"):
                     exclude = getattr(block, "__api_exclude__", None)
-                    content_blocks.append(block.model_dump(exclude=exclude))
+                    serialized = block.model_dump(exclude=exclude)
+                    if strip_tool_use:
+                        if serialized.get("type") != "text":
+                            continue
+                    content_blocks.append(serialized)
                 else:
                     if block.type == "text":
                         content_blocks.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
+                    elif block.type == "tool_use" and not strip_tool_use:
                         content_blocks.append({
                             "type": "tool_use",
                             "id": block.id,
                             "name": block.name,
                             "input": block.input,
                         })
+            if strip_tool_use and not content_blocks:
+                content_blocks.append({"type": "text", "text": ""})
             messages.append({"role": "assistant", "content": content_blocks})
             return
 
@@ -583,7 +613,7 @@ class RLMEngine:
             # OpenAI — reconstruct the assistant message
             msg = response.choices[0].message
             entry: dict = {"role": "assistant", "content": msg.content or ""}
-            if msg.tool_calls:
+            if msg.tool_calls and not strip_tool_use:
                 tool_calls = []
                 for tc in msg.tool_calls:
                     if hasattr(tc, "model_dump"):
@@ -623,6 +653,20 @@ class RLMEngine:
                     "tool_use_id": info["id"],
                     "content": output,
                 })
+
+            # Generate synthetic error tool_results for orphaned tool_use blocks.
+            covered_ids = {info["id"] for info in tool_use_info}
+            for block in response.content:
+                if block.type == "tool_use" and block.id not in covered_ids:
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": (
+                            "[Tool call ignored: invalid or unrecognized tool call. "
+                            "Please use the execute_python tool with a 'code' parameter.]"
+                        ),
+                    })
+
             messages.append({"role": "user", "content": tool_results})
         elif hasattr(response, "choices"):
             # OpenAI format: each tool_result is a separate "tool" role message
@@ -633,23 +677,88 @@ class RLMEngine:
                     "content": output,
                 })
 
+            covered_ids = {info["id"] for info in tool_use_info}
+            msg = response.choices[0].message
+            if msg.tool_calls:
+                for tc in msg.tool_calls:
+                    if tc.id not in covered_ids:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                "[Tool call ignored: invalid or unrecognized tool call. "
+                                "Please use the execute_python tool with a 'code' parameter.]"
+                            ),
+                        })
+
     def _execute_code(self, code: str, namespace: dict) -> str:
         """
         Execute Python code in the controlled REPL namespace.
         
         Captures stdout and returns it as a string.
         Catches exceptions and returns the traceback.
+        Enforces a timeout to prevent infinite loops.
         """
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
 
+        timed_out = False
+
+        def _timeout_handler(signum, frame):
+            del signum, frame
+            nonlocal timed_out
+            timed_out = True
+            raise TimeoutError("Code execution timed out")
+
+        # Prefer SIGALRM on Unix main thread; fallback does not hard-interrupt exec.
+        use_signal = (
+            hasattr(signal, "SIGALRM")
+            and threading.current_thread() is threading.main_thread()
+        )
+        old_handler = None
+        timer = None
+
+        if use_signal:
+            old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(EXEC_TIMEOUT_SECONDS)
+        else:
+            def _set_timed_out():
+                nonlocal timed_out
+                timed_out = True
+
+            timer = threading.Timer(EXEC_TIMEOUT_SECONDS, _set_timed_out)
+            timer.start()
+
         try:
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                 exec(code, namespace)
-        except Exception:
-            # Capture the traceback
-            tb = traceback.format_exc()
-            stdout_capture.write(f"\n[EXECUTION ERROR]\n{tb}")
+        except BaseException as exc:
+            if isinstance(exc, TimeoutError) or timed_out:
+                stdout_capture.write(
+                    f"\n[EXECUTION ERROR]\n"
+                    f"Code execution timed out after {EXEC_TIMEOUT_SECONDS} seconds. "
+                    f"Avoid infinite loops and long-running operations."
+                )
+            elif isinstance(exc, SystemExit):
+                stdout_capture.write(
+                    f"\n[EXECUTION ERROR]\n"
+                    f"Code called sys.exit({exc.code}). "
+                    f"This is not allowed in the REPL - use set_answer() to submit results."
+                )
+            elif isinstance(exc, KeyboardInterrupt):
+                stdout_capture.write(
+                    "\n[EXECUTION ERROR]\nKeyboardInterrupt caught in REPL code."
+                )
+            else:
+                tb = traceback.format_exc()
+                stdout_capture.write(f"\n[EXECUTION ERROR]\n{tb}")
+        finally:
+            if use_signal:
+                signal.alarm(0)
+                if old_handler is not None:
+                    signal.signal(signal.SIGALRM, old_handler)
+            elif timer is not None:
+                timer.cancel()
 
         output = stdout_capture.getvalue()
         stderr_output = stderr_capture.getvalue()

@@ -244,3 +244,21 @@ def test_route_init_requires_force_when_project_md_exists(tmp_path, monkeypatch)
 
     assert result["status"] == "success"
     assert captured["force"] is False
+
+
+def test_route_init_rewrites_env_error(monkeypatch, tmp_path):
+    """M2: /init with missing ANTHROPIC_API_KEY shows user-friendly error."""
+    def fake_cmd_init(args, *, quiet=False):
+        del args, quiet
+        raise EnvironmentError(
+            "ANTHROPIC_API_KEY not set. Add it to your .env file or export it."
+        )
+
+    monkeypatch.setattr(cli_commands, "cmd_init", fake_cmd_init)
+
+    router = CommandRouter(str(tmp_path))
+    result = router.route("/init")
+
+    assert result["status"] == "error"
+    assert "export ANTHROPIC_API_KEY" in result["message"]
+    assert ".env" not in result["message"]

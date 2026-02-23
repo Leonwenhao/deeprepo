@@ -39,7 +39,7 @@ class DeepRepoShell:
     def run(self):
         """Main loop. Blocks until exit."""
         check = needs_onboarding(self.project_path)
-        if check["needs_api_key"] or check["needs_init"]:
+        if check["needs_api_key"] or check.get("needs_anthropic_key", False) or check["needs_init"]:
             run_onboarding(self.project_path)
             self.state.refresh()
 
@@ -185,7 +185,7 @@ class DeepRepoShell:
         ascii_lines = [
             "[bold bright_cyan]     _                                [/bold bright_cyan]",
             "[bold cyan]  __| | ___  ___ _ __  _ __ ___ _ __   ___[/bold cyan]",
-            "[bold magenta] / _` |/ _ \\/ _ \\ '_ \\| '__/ _ \\ '_ \\ / _ \\[/bold magenta]",
+            "[bold magenta] / _` |/ _ \\/ _ \\ '_ \\| '__/ _ \\ '_ \\ / _ \\ [/bold magenta]",
             "[bold bright_magenta]| (_| |  __/  __/ |_) | | |  __/ |_) | (_) |[/bold bright_magenta]",
             "[bold purple] \\__,_|\\___|\\___|  __/|_|  \\___|  __/ \\___/[/bold purple]",
             "[bold bright_cyan]               |_|            |_|[/bold bright_cyan]",

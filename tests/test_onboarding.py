@@ -18,6 +18,7 @@ def _patch_global_config(tmp_path, monkeypatch):
 def test_needs_onboarding_all_missing(tmp_path, monkeypatch):
     onboarding_mod, _, _ = _patch_global_config(tmp_path, monkeypatch)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     result = onboarding_mod.needs_onboarding(str(tmp_path))
 
@@ -66,6 +67,7 @@ def test_needs_onboarding_project_initialized(tmp_path, monkeypatch):
 def test_needs_onboarding_nothing_needed(tmp_path, monkeypatch):
     onboarding_mod, _, _ = _patch_global_config(tmp_path, monkeypatch)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-ready")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ready")
 
     deeprepo_dir = tmp_path / ".deeprepo"
     deeprepo_dir.mkdir(parents=True)
@@ -113,6 +115,7 @@ def test_save_global_api_key(tmp_path, monkeypatch):
 def test_run_onboarding_skips_when_nothing_needed(tmp_path, monkeypatch):
     onboarding_mod, _, _ = _patch_global_config(tmp_path, monkeypatch)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-ready")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ready")
 
     deeprepo_dir = tmp_path / ".deeprepo"
     deeprepo_dir.mkdir(parents=True)
@@ -131,6 +134,7 @@ def test_run_onboarding_skips_when_nothing_needed(tmp_path, monkeypatch):
 def test_run_onboarding_prompts_for_api_key(tmp_path, monkeypatch):
     onboarding_mod, _, fake_config_file = _patch_global_config(tmp_path, monkeypatch)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ready")
 
     deeprepo_dir = tmp_path / ".deeprepo"
     deeprepo_dir.mkdir(parents=True)
@@ -148,6 +152,7 @@ def test_run_onboarding_prompts_for_api_key(tmp_path, monkeypatch):
 def test_run_onboarding_skip_api_key(tmp_path, monkeypatch):
     onboarding_mod, _, fake_config_file = _patch_global_config(tmp_path, monkeypatch)
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ready")
 
     deeprepo_dir = tmp_path / ".deeprepo"
     deeprepo_dir.mkdir(parents=True)
@@ -165,6 +170,7 @@ def test_run_onboarding_skip_api_key(tmp_path, monkeypatch):
 def test_run_onboit(tmp_path, monkeypatch):
     onboarding_mod, _, _ = _patch_global_config(tmp_path, monkeypatch)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-ready")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-ready")
 
     responses = iter(["y"])
     result = onboarding_mod.run_onboarding(str(tmp_path), input_fn=lambda _prompt: next(responses))
@@ -172,3 +178,20 @@ def test_run_onboit(tmp_path, monkeypatch):
     assert result["api_key_configured"] is True
     assert result["project_initialized"] is False
     assert result["skipped"] is False
+
+
+def test_needs_onboarding_missing_anthropic_key(tmp_path, monkeypatch):
+    """H4: needs_onboarding should detect missing ANTHROPIC_API_KEY."""
+    onboarding_mod, _, _ = _patch_global_config(tmp_path, monkeypatch)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-v1-ready")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    deeprepo_dir = tmp_path / ".deeprepo"
+    deeprepo_dir.mkdir(parents=True)
+    (deeprepo_dir / "config.yaml").write_text("project_name: demo\n", encoding="utf-8")
+
+    result = onboarding_mod.needs_onboarding(str(tmp_path))
+
+    assert result["needs_api_key"] is False
+    assert result["needs_anthropic_key"] is True
+    assert result["needs_init"] is False

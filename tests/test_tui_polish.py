@@ -84,3 +84,32 @@ def test_welcome_banner_includes_ascii_art(tmp_path, capsys):
     shell._print_welcome()
     captured = capsys.readouterr()
     assert "___" in captured.out or "|_|" in captured.out or "/ _ \\" in captured.out
+
+
+def test_banner_no_markup_leak(tmp_path):
+    """M1: Banner should not show literal Rich markup tags like [/bold magenta]."""
+    from io import StringIO
+
+    from rich.console import Console
+    from deeprepo.tui.shell import DeepRepoShell
+
+    DeepRepoShell(str(tmp_path))
+
+    buf = StringIO()
+    test_console = Console(file=buf, force_terminal=True, width=120)
+
+    ascii_lines = [
+        "[bold bright_cyan]     _                                [/bold bright_cyan]",
+        "[bold cyan]  __| | ___  ___ _ __  _ __ ___ _ __   ___[/bold cyan]",
+        "[bold magenta] / _` |/ _ \\/ _ \\ '_ \\| '__/ _ \\ '_ \\ / _ \\ [/bold magenta]",
+        "[bold bright_magenta]| (_| |  __/  __/ |_) | | |  __/ |_) | (_) |[/bold bright_magenta]",
+        "[bold purple] \\__,_|\\___|\\___|  __/|_|  \\___|  __/ \\___/[/bold purple]",
+        "[bold bright_cyan]               |_|            |_|[/bold bright_cyan]",
+    ]
+    for line in ascii_lines:
+        test_console.print(line)
+
+    output = buf.getvalue()
+    assert "[/bold" not in output, f"Markup leak detected in banner output: {output}"
+    assert "[/cyan" not in output, f"Markup leak detected in banner output: {output}"
+    assert "[/magenta" not in output, f"Markup leak detected in banner output: {output}"

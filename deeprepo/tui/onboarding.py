@@ -12,39 +12,68 @@ GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.yaml"
 _console = Console()
 
 
-def load_global_api_key() -> str | None:
-    """Read API key from ~/.deeprepo/config.yaml if it exists."""
+def load_global_api_keys() -> dict:
+    """Read API keys from ~/.deeprepo/config.yaml if it exists.
+
+    Returns:
+        {"api_key": str | None, "anthropic_api_key": str | None}
+    """
+    result = {"api_key": None, "anthropic_api_key": None}
     if not GLOBAL_CONFIG_FILE.is_file():
-        return None
+        return result
 
     try:
         data = yaml.safe_load(GLOBAL_CONFIG_FILE.read_text(encoding="utf-8")) or {}
     except (OSError, yaml.YAMLError):
-        return None
+        return result
 
     if not isinstance(data, dict):
-        return None
+        return result
 
-    api_key = data.get("api_key")
-    if not isinstance(api_key, str):
-        return None
+    for field in ("api_key", "anthropic_api_key"):
+        val = data.get(field)
+        if isinstance(val, str) and val.strip():
+            result[field] = val.strip()
 
-    key = api_key.strip()
-    return key or None
+    return result
 
 
-def save_global_api_key(api_key: str) -> None:
-    """Save API key to ~/.deeprepo/config.yaml and set in os.environ."""
-    key = api_key.strip()
-    if not key:
-        raise ValueError("api_key cannot be empty")
+def load_global_api_key() -> str | None:
+    """Legacy wrapper — returns OpenRouter key only."""
+    return load_global_api_keys()["api_key"]
+
+
+def save_global_api_keys(
+    openrouter_key: str | None = None,
+    anthropic_key: str | None = None,
+) -> None:
+    """Save API key(s) to ~/.deeprepo/config.yaml and set in os.environ."""
+    existing = load_global_api_keys()
+
+    openrouter = (openrouter_key or "").strip() or existing["api_key"]
+    anthropic = (anthropic_key or "").strip() or existing["anthropic_api_key"]
+
+    if not openrouter and not anthropic:
+        raise ValueError("At least one API key must be provided")
+
+    config = {}
+    if openrouter:
+        config["api_key"] = openrouter
+        os.environ["OPENROUTER_API_KEY"] = openrouter
+    if anthropic:
+        config["anthropic_api_key"] = anthropic
+        os.environ["ANTHROPIC_API_KEY"] = anthropic
 
     GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     GLOBAL_CONFIG_FILE.write_text(
-        yaml.safe_dump({"api_key": key}, sort_keys=False),
+        yaml.safe_dump(config, sort_keys=False),
         encoding="utf-8",
     )
-    os.environ["OPENROUTER_API_KEY"] = key
+
+
+def save_global_api_key(api_key: str) -> None:
+    """Legacy wrapper — saves OpenRouter key only."""
+    save_global_api_keys(openrouter_key=api_key)
 
 
 def needs_onboarding(project_path: str) -> dict:
@@ -52,24 +81,32 @@ def needs_onboarding(project_path: str) -> dict:
 
     Returns:
         {
-            "needs_api_key": bool,   # No OPENROUTER_API_KEY in env or global config
-            "needs_init": bool,      # No .deeprepo/ in project directory
+            "needs_api_key": bool,        # No OPENROUTER_API_KEY (backward compat key)
+            "needs_anthropic_key": bool,  # No ANTHROPIC_API_KEY
+            "needs_init": bool,           # No .deeprepo/ in project directory
         }
     """
     env_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
-    needs_api_key = not bool(env_key)
+    needs_openrouter = not bool(env_key)
 
-    if needs_api_key:
-        global_key = load_global_api_key()
-        if global_key:
-            os.environ["OPENROUTER_API_KEY"] = global_key
-            needs_api_key = False
+    env_anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    needs_anthropic = not bool(env_anthropic_key)
+
+    if needs_openrouter or needs_anthropic:
+        keys = load_global_api_keys()
+        if needs_openrouter and keys["api_key"]:
+            os.environ["OPENROUTER_API_KEY"] = keys["api_key"]
+            needs_openrouter = False
+        if needs_anthropic and keys["anthropic_api_key"]:
+            os.environ["ANTHROPIC_API_KEY"] = keys["anthropic_api_key"]
+            needs_anthropic = False
 
     project_deeprepo_dir = Path(project_path).resolve() / ".deeprepo"
     needs_init = not project_deeprepo_dir.is_dir()
 
     return {
-        "needs_api_key": needs_api_key,
+        "needs_api_key": needs_openrouter,
+        "needs_anthropic_key": needs_anthropic,
         "needs_init": needs_init,
     }
 
@@ -85,6 +122,7 @@ def run_onboarding(project_path: str, *, input_fn=None) -> dict:
     Returns:
         {
             "api_key_configured": bool,
+            "anthropic_key_configured": bool,
             "project_initialized": bool,
             "skipped": bool,  # True if nothing was needed
         }
@@ -93,10 +131,12 @@ def run_onboarding(project_path: str, *, input_fn=None) -> dict:
         input_fn = input
 
     check = needs_onboarding(project_path)
-    skipped = not (check["needs_api_key"] or check["needs_init"])
+    needs_any_key = check["needs_api_key"] or check.get("needs_anthropic_key", False)
+    skipped = not (needs_any_key or check["needs_init"])
 
     result = {
         "api_key_configured": not check["needs_api_key"],
+        "anthropic_key_configured": not check.get("needs_anthropic_key", False),
         "project_initialized": not check["needs_init"],
         "skipped": skipped,
     }
@@ -104,19 +144,33 @@ def run_onboarding(project_path: str, *, input_fn=None) -> dict:
     if skipped:
         return result
 
-    if check["needs_api_key"]:
-        _console.print("[cyan]deeprepo uses OpenRouter for AI model access.[/cyan]")
-        _console.print("[dim]Get your key at: https://openrouter.ai/keys[/dim]")
-        api_key = input_fn("Enter your OpenRouter API key (or press Enter to skip): ").strip()
-        if api_key:
-            save_global_api_key(api_key)
+    if check.get("needs_anthropic_key", False):
+        _console.print("[cyan]deeprepo uses Anthropic Claude as the root orchestrator model.[/cyan]")
+        _console.print("[dim]Get your key at: https://console.anthropic.com/settings/keys[/dim]")
+        ant_key = input_fn("Enter your Anthropic API key (or press Enter to skip): ").strip()
+        if ant_key:
+            save_global_api_keys(anthropic_key=ant_key)
             _console.print(
-                f"[green]API key saved to ~/.deeprepo/config.yaml ({api_key[:8]}...).[/green]"
+                f"[green]Anthropic key saved to ~/.deeprepo/config.yaml ({ant_key[:8]}...).[/green]"
+            )
+            result["anthropic_key_configured"] = True
+        else:
+            _console.print("[yellow]Skipped. /init requires an Anthropic API key.[/yellow]")
+            result["anthropic_key_configured"] = False
+
+    if check["needs_api_key"]:
+        _console.print("[cyan]deeprepo uses OpenRouter for sub-model AI workers.[/cyan]")
+        _console.print("[dim]Get your key at: https://openrouter.ai/keys[/dim]")
+        or_key = input_fn("Enter your OpenRouter API key (or press Enter to skip): ").strip()
+        if or_key:
+            save_global_api_keys(openrouter_key=or_key)
+            _console.print(
+                f"[green]OpenRouter key saved to ~/.deeprepo/config.yaml ({or_key[:8]}...).[/green]"
             )
             result["api_key_configured"] = True
         else:
             _console.print(
-                "[yellow]Skipped. Commands needing API access won't work until a key is set.[/yellow]"
+                "[yellow]Skipped. Commands needing AI workers won't work until a key is set.[/yellow]"
             )
             result["api_key_configured"] = False
 

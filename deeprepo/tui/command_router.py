@@ -4,6 +4,29 @@ import argparse
 import shlex
 from pathlib import Path
 
+from rich.console import Console
+
+
+_console = Console()
+
+
+def _rewrite_env_error(exc: EnvironmentError) -> dict:
+    """Translate EnvironmentError messages for TUI users."""
+    msg = str(exc)
+    if "ANTHROPIC_API_KEY" in msg:
+        return {
+            "status": "error",
+            "message": "Anthropic API key not set. Run: export ANTHROPIC_API_KEY=sk-ant-...",
+            "data": {},
+        }
+    if "OPENROUTER_API_KEY" in msg:
+        return {
+            "status": "error",
+            "message": "OpenRouter API key not set. Run: export OPENROUTER_API_KEY=sk-or-...",
+            "data": {},
+        }
+    return {"status": "error", "message": f"Command failed: {exc}", "data": {}}
+
 
 class CommandRouter:
     """Parses slash commands and dispatches to existing cmd_* handlers."""
@@ -102,7 +125,11 @@ class CommandRouter:
             sub_model=None,
             max_turns=None,
         )
-        return cmd_init(args, quiet=True)
+        try:
+            with _console.status("[cyan]Analyzing project...[/cyan]", spinner="dots"):
+                return cmd_init(args, quiet=True)
+        except EnvironmentError as exc:
+            return _rewrite_env_error(exc)
 
     def _do_context(self, tokens: list[str]) -> dict:
         from deeprepo.cli_commands import cmd_context
@@ -172,7 +199,11 @@ class CommandRouter:
             full=full,
             quiet=True,
         )
-        return cmd_refresh(args, quiet=True)
+        try:
+            with _console.status("[cyan]Refreshing context...[/cyan]", spinner="dots"):
+                return cmd_refresh(args, quiet=True)
+        except EnvironmentError as exc:
+            return _rewrite_env_error(exc)
 
     def _do_team(self, tokens: list[str]) -> dict:
         del tokens
