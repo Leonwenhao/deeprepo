@@ -7,7 +7,7 @@ One command analyzes your project and generates a compressed context prompt that
 ## Quickstart
 
 ```bash
-pip install deeprepo
+pip install deeprepo-cli
 deeprepo init .
 deeprepo context --copy   # paste into any AI tool
 ```
@@ -124,7 +124,7 @@ Short aliases work on the CLI: `--root-model sonnet`, `--root-model opus`, `--su
 
 - **Teams** — named multi-agent compositions for different analysis workflows
 - **More `--format` targets** — Windsurf, Aider, generic system prompt
-- **PyPI publication** — `pip install deeprepo` from the real package index
+- **PyPI publication** — `pip install deeprepo-cli` from the real package index
 
 ## License
 
