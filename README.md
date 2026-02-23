@@ -1,8 +1,39 @@
-# deeprepo — recursive LLM orchestration across domains
+# deeprepo
 
-Large inputs defeat single-prompt LLMs — context windows overflow, and quality degrades well before that. deeprepo fixes this with a root LLM that operates in a Python REPL loop, exploring your data as structured files and dispatching focused tasks to cheap sub-LLM workers. Code analysis is the flagship domain: on FastAPI (47 files), a $0.46 Sonnet RLM achieved 100% file coverage where a $0.99 Opus single-call baseline reached only 89% — missing FastAPI's core application class, routing engine, and dependency injection system entirely. The same engine now supports pluggable domains, with content analysis shipping as the second vertical. [Full benchmarks →](BENCHMARK_RESULTS.md)
+Your AI tools forget everything between sessions. deeprepo gives them memory.
 
-## How It Works
+One command analyzes your project and generates a compressed context prompt that any AI coding tool can consume — architecture, patterns, conventions, and active development state. No more re-explaining your codebase every session.
+
+## Quickstart
+
+```bash
+pip install deeprepo
+deeprepo init .
+deeprepo context --copy   # paste into any AI tool
+```
+
+`init` runs a one-time analysis (~$0.50, takes 2-3 minutes). After that, `context` is instant — it reads local files, no API call needed.
+
+## What it generates
+
+```
+.deeprepo/
+├── config.yaml      # project configuration
+├── PROJECT.md       # full project bible (architecture, patterns, conventions)
+├── COLD_START.md    # compressed context prompt optimized for AI consumption
+├── SESSION_LOG.md   # running development history
+└── SCRATCHPAD.md    # working notes for multi-agent coordination
+```
+
+`PROJECT.md` is the complete analysis. `COLD_START.md` is the same content compressed to fit inside a context window — typically under 3,000 tokens. That's what `deeprepo context` outputs.
+
+## Live proof
+
+We ran `deeprepo init` on deeprepo itself. Cost: $0.63. Output: a 3,008-token cold-start prompt. A fresh Claude Code session immediately knew the architecture, file layout, and coding patterns — then implemented a new CLI feature without any re-explanation. The prompt paid for itself in the first interaction.
+
+## How it works
+
+deeprepo uses a Recursive Language Model (RLM) pattern — a root LLM operates in a Python REPL loop, exploring your codebase and dispatching focused analysis tasks to cheap sub-LLM workers.
 
 ```
 ┌─────────────────────────────────────────────────┐
@@ -27,13 +58,33 @@ Large inputs defeat single-prompt LLMs — context windows overflow, and quality
 └─────────────────────────────────────────────────┘
 ```
 
-The root model writes code, we execute it, feed back the output, and it writes more code — looping until it sets `answer["ready"] = True`. Sub-LLM calls happen inside the REPL code, so the root model's context stays clean. This implements the [Recursive Language Model](https://arxiv.org/abs/2512.24601) pattern from MIT research, extended with [Prime Intellect's](https://www.primeintellect.ai/blog/rlm) parallel dispatch and iterative answer refinement.
+The root model never sees raw file contents — it writes Python code to explore, dispatches individual files to cheap workers, and synthesizes findings across turns. All sub-LLM calls go through OpenRouter, so one API key gives you access to every model.
 
-**Domain plugins** make this architecture reusable beyond code. Each domain provides its own loader, prompts, and metadata — the RLM engine stays the same. Code analysis ships built-in, content analysis is the second vertical, and more domains are on the way.
+## Commands
 
-## Results
+```bash
+# Core workflow
+deeprepo init <path>              # Analyze project, generate .deeprepo/ context
+deeprepo context [--copy]         # Output cold-start prompt (instant, no API)
+deeprepo context --format cursor  # Write .cursorrules file
+deeprepo refresh [--full]         # Diff-aware context update
+deeprepo status                   # Context health dashboard
 
-Benchmarked across three codebases: FastAPI (47 files), Pydantic (105 files), and Jianghu V3 (289 files). The FastAPI head-to-head comparison is the cleanest test — same codebase, same task, two approaches:
+# Session tracking
+deeprepo log "message"            # Record session activity
+deeprepo log show                 # View recent sessions
+
+# Advanced
+deeprepo teams                    # List available agent teams
+deeprepo new                      # Greenfield project scaffolding
+deeprepo analyze <path>           # RLM codebase analysis (full report)
+deeprepo baseline <path>          # Single-model comparison run
+deeprepo compare <path>           # Run both, compare metrics
+```
+
+## Benchmarks
+
+The RLM engine was benchmarked on FastAPI (47 files) — same codebase, same task, two approaches:
 
 | Metric | Sonnet RLM | Opus Baseline |
 |--------|:----------:|:-------------:|
@@ -42,149 +93,38 @@ Benchmarked across three codebases: FastAPI (47 files), Pydantic (105 files), an
 | Sub-LLM cost | $0.02 | N/A |
 | Files covered | 47/47 (100%) | 42/47 (89%) |
 
-The 5 files the baseline excluded account for 74% of FastAPI's codebase by character count — including `applications.py` (the core FastAPI class), `routing.py` (the routing engine, which alone exceeds the baseline's entire prompt budget), and the dependency injection system. The sub-LLM worker layer cost only $0.02 for the entire run. The coverage advantage grows with codebase size: the baseline went from 89% on FastAPI's 47 files down to 48% on Jianghu V3's 289 files, while the RLM maintained 100% in both cases.
+The 5 files the baseline missed account for 74% of FastAPI's codebase by size — including the core FastAPI class, routing engine, and dependency injection system. The coverage gap widens with scale: the baseline dropped to 48% on a 289-file codebase while the RLM maintained 100%.
 
-One honest caveat: for files both approaches can see, the Opus baseline produces more precise per-file findings with direct code-level citations. The RLM advantage is coverage breadth, not per-file depth.
+Honest caveat: for files both approaches can see, the Opus baseline produces more precise per-file findings. The RLM advantage is coverage breadth, not per-file depth.
 
-Full data — including the Pydantic standalone run and Jianghu V3 three-way root model comparison — is in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.11+
-- API keys for [Anthropic](https://console.anthropic.com/) (root model) and [OpenRouter](https://openrouter.ai/) (sub-LLM workers)
-
-### Install
-
-```bash
-git clone https://github.com/Leonwenhao/deeprepo.git
-cd deeprepo
-pip install -e .
-```
-
-### Configure
-
-```bash
-cp .env.example .env
-# Edit .env with your API keys:
-#   ANTHROPIC_API_KEY=sk-ant-...
-#   OPENROUTER_API_KEY=sk-or-...
-```
-
-### Run
-
-Use `python -m deeprepo.cli` or the `deeprepo` entry point after `pip install -e .`.
-
-```bash
-# Analyze a GitHub repo (code analysis, default)
-deeprepo analyze https://github.com/tiangolo/fastapi
-
-# Analyze a local directory
-deeprepo analyze ./my-project
-
-# Use a different domain
-deeprepo analyze ./my-content --domain content
-
-# List available domains
-deeprepo list-domains
-
-# Run single-model baseline for comparison
-deeprepo baseline ./my-project
-
-# Compare RLM vs baseline (split-model: Sonnet RLM vs Opus baseline)
-deeprepo compare https://github.com/tiangolo/fastapi --baseline-model opus
-
-# Quiet mode (no progress output)
-deeprepo analyze ./my-project -q
-
-# Save to specific directory
-deeprepo analyze ./my-project -o ./reports
-```
-
-### Output
-
-The tool produces a structured Markdown report covering architecture overview, bug and issue audit, code quality assessment, and a prioritized development plan. A `_metrics.json` file with token usage, cost breakdown, timing, and file coverage stats is saved alongside the report.
+Full data in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
 
 ## Configuration
 
-### Model Selection
-
-By default, the tool uses **Claude Sonnet 4.5** (`claude-sonnet-4-5-20250929`) as root orchestrator and **MiniMax M2.5** as sub-LLM workers. The `--root-model` flag accepts short aliases (`sonnet`, `opus`, `minimax`) or full model strings:
-
 ```bash
-# Use Opus for maximum quality (more expensive)
-deeprepo analyze ./my-project --root-model opus
+# Required: OpenRouter key for sub-LLM workers + alternative root models
+export OPENROUTER_API_KEY=sk-or-...
 
-# Use a specific model string directly
-deeprepo analyze ./my-project --root-model claude-opus-4-6
-
-# Adjust max REPL turns (default: 15)
-deeprepo analyze ./my-project --max-turns 20
+# Optional: Anthropic key for Claude root models (falls back to OpenRouter)
+export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### Cost Estimates
+After `deeprepo init`, project settings live in `.deeprepo/config.yaml`:
 
-| Codebase Size | Estimated Cost (Sonnet root) | Estimated Time |
-|:--|--:|--:|
-| Small (<50 files) | $0.20–0.50 | 1–3 min |
-| Medium (50–300 files) | $0.50–1.50 | 3–8 min |
-| Large (300–1000 files) | $1.00–3.00 | 5–15 min |
-| Very large (1000+ files) | $2.00–5.00 | 10–25 min |
-
-Sub-LLM costs are negligible regardless of codebase size (~$0.002 per file analyzed). Estimates for codebases above 300 files are extrapolated from observed scaling trends, not direct measurements.
-
-For implementation details, see [DEVELOPMENT.md](DEVELOPMENT.md).
-
-## Project Structure
-
-```
-deeprepo/
-├── pyproject.toml
-├── README.md
-├── LICENSE
-├── .env.example
-├── deeprepo/
-│   ├── __init__.py
-│   ├── llm_clients.py      # Anthropic + OpenRouter API wrappers with token tracking
-│   ├── codebase_loader.py   # Git clone → structured file tree + metadata
-│   ├── content_loader.py    # Local directory → document tree + metadata
-│   ├── rlm_scaffold.py      # Core engine: REPL loop + sub-LLM dispatch
-│   ├── prompts.py           # System prompts for root model + sub-LLMs
-│   ├── baseline.py          # Single-model baseline for comparison
-│   ├── cache.py             # Content-hash cache for sub-LLM results
-│   ├── utils.py             # Shared utilities
-│   ├── cli.py               # CLI entry point
-│   └── domains/             # Pluggable domain configs
-│       ├── __init__.py      # Domain registry
-│       ├── base.py          # DomainConfig dataclass
-│       ├── code.py          # Code analysis domain
-│       └── content.py       # Content analysis domain
-├── outputs/                  # Analysis reports land here
-├── examples/
-│   ├── fastapi/             # Example code analysis outputs
-│   ├── pydantic/            # Example code analysis outputs
-│   └── content-demo/        # Example content analysis inputs
-├── tests/
-│   ├── test_small/          # 3-file test codebase with planted bugs
-│   ├── test_content/        # Test content corpus
-│   └── test_integration.py
-└── archive/                  # Internal development docs
+```yaml
+root_model: anthropic/claude-sonnet-4-5
+sub_model: minimax/minimax-m2.5
+context_max_tokens: 3000
+include_tech_debt: true
 ```
 
-## What's Next
+Short aliases work on the CLI: `--root-model sonnet`, `--root-model opus`, `--sub-model minimax`.
 
-- **More domain plugins** — the domain system is built to extend; legal, research, and documentation analysis are candidates for future verticals.
-- **Content analysis refinements** — the content domain shipped as a proof-of-concept; next steps include richer metadata extraction and cross-document relationship mapping.
-- **SWE-bench Verified migration** — adapting output format from markdown reports to git diffs/patches for industry-standard evaluation.
-- **RL training** — closing the Sonnet-Opus behavioral gap (Sonnet satisfices at 9 dispatches vs Opus's 61) through reinforcement learning on delegation behavior.
+## Roadmap
 
-## Built On
-
-- [Recursive Language Models](https://arxiv.org/abs/2512.24601) (MIT, 2025) — the RLM pattern
-- [Prime Intellect RLM Extensions](https://www.primeintellect.ai/blog/rlm) — parallel dispatch, answer variable pattern
-- [MiniMax M2.5](https://www.minimax.io/) — sub-LLM worker model (80.2% SWE-bench Verified, 1/20th frontier cost)
-- [Anthropic Claude](https://www.anthropic.com/) — root orchestrator model
+- **Teams** — named multi-agent compositions for different analysis workflows
+- **More `--format` targets** — Windsurf, Aider, generic system prompt
+- **PyPI publication** — `pip install deeprepo` from the real package index
 
 ## License
 
