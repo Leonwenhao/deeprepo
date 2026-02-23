@@ -402,6 +402,12 @@ def main():
     p_context = subparsers.add_parser("context", help="Output cold-start prompt")
     p_context.add_argument("--path", default=".", help="Project path (default: current directory)")
     p_context.add_argument("--copy", action="store_true", help="Copy to clipboard")
+    p_context.add_argument(
+        "--format",
+        choices=["markdown", "cursor"],
+        default="markdown",
+        help="Output format (default: markdown). 'cursor' writes .cursorrules file",
+    )
     p_context.set_defaults(func=cli_commands.cmd_context)
 
     # refresh command

@@ -221,6 +221,7 @@ def cmd_context(args):
     project_path = getattr(args, "path", ".") or "."
     project_path = str(Path(project_path).resolve())
     copy_flag = getattr(args, "copy", False)
+    fmt = getattr(args, "format", "markdown") or "markdown"
 
     cm = ConfigManager(project_path)
     if not cm.is_initialized():
@@ -237,6 +238,12 @@ def cmd_context(args):
         ui.print_error(str(exc))
         ui.print_msg("Run 'deeprepo init' to generate project context.")
         sys.exit(1)
+
+    if fmt == "cursor":
+        out_path = Path(project_path) / ".cursorrules"
+        out_path.write_text(content, encoding="utf-8")
+        ui.print_msg(f"Wrote .cursorrules to {out_path}")
+        return
 
     if copy_flag:
         try:
