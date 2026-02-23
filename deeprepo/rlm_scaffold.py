@@ -146,6 +146,9 @@ class RLMEngine:
                 print(f"REPL Turn {turn}/{self.max_turns}")
                 print(f"{'='*60}")
 
+            # Pre-flight: ensure no empty text content blocks
+            self._validate_messages(messages)
+
             # Get root model's response with tool definition
             t0 = time.time()
             response = self.root_client.complete(
@@ -572,6 +575,32 @@ class RLMEngine:
             return "\n".join(parts)
         return str(response)
 
+    @staticmethod
+    def _validate_messages(messages: list[dict]) -> None:
+        """Pre-flight check: ensure no message contains empty text content blocks.
+
+        Fixes any empty text blocks in-place to prevent 400 errors from the
+        Anthropic API ('text content blocks must be non-empty').
+        """
+        for msg in messages:
+            content = msg.get("content")
+            if not isinstance(content, list):
+                continue
+            # Filter out empty text blocks in-place
+            cleaned = [
+                block for block in content
+                if not (
+                    isinstance(block, dict)
+                    and block.get("type") == "text"
+                    and not block.get("text", "").strip()
+                )
+            ]
+            if cleaned != content:
+                if not cleaned:
+                    # All blocks were empty — insert placeholder
+                    cleaned = [{"type": "text", "text": "[Acknowledged]"}]
+                msg["content"] = cleaned
+
     def _append_assistant_message(
         self,
         messages: list[dict],
@@ -593,9 +622,15 @@ class RLMEngine:
                     if strip_tool_use:
                         if serialized.get("type") != "text":
                             continue
+                    # Skip empty text blocks — the API rejects them
+                    if serialized.get("type") == "text" and not serialized.get("text", "").strip():
+                        continue
                     content_blocks.append(serialized)
                 else:
                     if block.type == "text":
+                        # Skip empty text blocks
+                        if not block.text or not block.text.strip():
+                            continue
                         content_blocks.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use" and not strip_tool_use:
                         content_blocks.append({
@@ -604,8 +639,14 @@ class RLMEngine:
                             "name": block.name,
                             "input": block.input,
                         })
-            if strip_tool_use and not content_blocks:
-                content_blocks.append({"type": "text", "text": ""})
+            if not content_blocks:
+                if strip_tool_use:
+                    # All blocks were tool_use; insert a placeholder so the
+                    # message chain stays valid for subsequent turns.
+                    content_blocks.append({"type": "text", "text": "[Acknowledged]"})
+                else:
+                    # Nothing meaningful to append — skip entirely.
+                    return
             messages.append({"role": "assistant", "content": content_blocks})
             return
 
@@ -785,7 +826,7 @@ def run_analysis(
         codebase_path: Local path to the codebase (or git URL)
         verbose: Print progress to stderr
         max_turns: Maximum REPL iterations
-        root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-5-20250929")
+        root_model: Model string for root LLM (e.g. "claude-opus-4-6", "claude-sonnet-4-6-20250514")
         sub_model: OpenRouter model string for sub-LLM file analysis workers
         use_cache: Enable sub-LLM response cache for repeated prompts
         domain: Domain name from registry (default: "code")

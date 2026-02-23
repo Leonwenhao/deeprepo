@@ -196,3 +196,134 @@ def test_early_break_on_set_answer(engine):
     assert len(all_output) == 1, f"Expected 1 output, got {len(all_output)}: {all_output}"
     assert answer["ready"] is True
     assert answer["content"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# T1 — strip_tool_use with tool_use-only response (no text blocks at all)
+# ---------------------------------------------------------------------------
+def test_strip_tool_use_only_response_no_empty_text(engine):
+    """After stripping a tool_use-only response, no empty text blocks remain."""
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_1",
+                name="execute_python",
+                input={"code": "print(1)"},
+            ),
+        ]
+    )
+
+    messages = []
+    engine._append_assistant_message(messages, response, strip_tool_use=True)
+
+    assert len(messages) == 1
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+
+    for block in content:
+        if block.get("type") == "text":
+            assert block["text"].strip(), f"Empty text block found: {block}"
+
+
+# ---------------------------------------------------------------------------
+# T2 — strip_tool_use with mixed response preserves text, no empty blocks
+# ---------------------------------------------------------------------------
+def test_strip_tool_use_mixed_response_preserves_text(engine):
+    """Stripping tool_use from a mixed response keeps text intact, no empties."""
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(type="text", text="Analyzing the project structure."),
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_2",
+                name="execute_python",
+                input={"code": "print('hi')"},
+            ),
+        ]
+    )
+
+    messages = []
+    engine._append_assistant_message(messages, response, strip_tool_use=True)
+
+    assert len(messages) == 1
+    content = messages[0]["content"]
+    assert isinstance(content, list)
+
+    text_blocks = [b for b in content if b.get("type") == "text"]
+    assert len(text_blocks) == 1
+    assert "Analyzing" in text_blocks[0]["text"]
+
+    for block in content:
+        if block.get("type") == "text":
+            assert block["text"].strip(), f"Empty text block found: {block}"
+
+
+# ---------------------------------------------------------------------------
+# T3 — _validate_messages catches and fixes empty text blocks
+# ---------------------------------------------------------------------------
+def test_validate_messages_catches_empty_text(engine):
+    """Pre-flight validation must fix empty text content blocks."""
+    messages = [
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": [{"type": "text", "text": ""}]},
+        {"role": "assistant", "content": [
+            {"type": "text", "text": "  "},
+            {"type": "text", "text": "Valid text"},
+        ]},
+    ]
+
+    engine._validate_messages(messages)
+
+    # First message (plain string) should be untouched
+    assert messages[0]["content"] == "Hello"
+
+    # Second message had only an empty block — should get placeholder
+    content1 = messages[1]["content"]
+    assert isinstance(content1, list)
+    assert len(content1) == 1
+    assert content1[0]["text"].strip()  # non-empty
+
+    # Third message: empty block removed, valid block preserved
+    content2 = messages[2]["content"]
+    assert isinstance(content2, list)
+    assert len(content2) == 1
+    assert content2[0]["text"] == "Valid text"
+
+
+# ---------------------------------------------------------------------------
+# T4 — End-to-end: first turn message construction has no empty text blocks
+# ---------------------------------------------------------------------------
+def test_first_turn_messages_valid(engine):
+    """The initial message list for the first API call must pass validation."""
+    messages = [{"role": "user", "content": "Analyze this codebase."}]
+
+    # Simulate a tool_use-only response on the first turn (model returns no text)
+    response = SimpleNamespace(
+        content=[
+            SimpleNamespace(
+                type="tool_use",
+                id="toolu_first",
+                name="execute_python",
+                input={"code": "import os; print(os.listdir('.'))"},
+            ),
+        ]
+    )
+
+    # This is the "no code blocks extracted" path where strip_tool_use=True
+    engine._append_assistant_message(messages, response, strip_tool_use=True)
+    messages.append({
+        "role": "user",
+        "content": "Please use the execute_python tool to continue.",
+    })
+
+    # Run pre-flight validation — should not raise
+    engine._validate_messages(messages)
+
+    # Verify no empty text blocks anywhere
+    for msg in messages:
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    assert block["text"].strip(), f"Empty text block in: {msg}"
