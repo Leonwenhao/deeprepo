@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sample-project"
+version = "0.1.0"
+description = "A sample FastAPI project for testing"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

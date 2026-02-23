@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 
 from . import __version__
+from . import cli_commands
 try:
     from .llm_clients import DEFAULT_SUB_MODEL
 except Exception:  # pragma: no cover - environment-specific import issue
@@ -371,6 +372,76 @@ def main():
     # list-domains command
     p_list_domains = subparsers.add_parser("list-domains", help="List available analysis domains")
     p_list_domains.set_defaults(func=cmd_list_domains)
+
+    # teams command
+    p_teams = subparsers.add_parser("teams", help="List available teams")
+    p_teams.set_defaults(func=cli_commands.cmd_list_teams)
+
+    # new command
+    p_new = subparsers.add_parser("new", help="Create a new project with AI scaffolding")
+    p_new.add_argument("--description", "-d", default=None, help="Project description")
+    p_new.add_argument("--stack", "-s", default=None, help="Stack (e.g. python-fastapi)")
+    p_new.add_argument("--name", "-n", default=None, help="Project name")
+    p_new.add_argument("--team", default="analyst", help="Team to use (default: analyst)")
+    p_new.add_argument("--output", "-o", default=".", help="Output directory (default: current)")
+    p_new.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+    p_new.set_defaults(func=cli_commands.cmd_new)
+
+    # init command
+    p_init = subparsers.add_parser("init", help="Initialize .deeprepo/ project context")
+    p_init.add_argument("path", nargs="?", default=".", help="Project path (default: current directory)")
+    p_init.add_argument("--team", default="analyst", help="Team to use (default: analyst)")
+    p_init.add_argument("--force", action="store_true", help="Overwrite existing .deeprepo/")
+    p_init.add_argument("-q", "--quiet", action="store_true", help="Suppress verbose output")
+    p_init.add_argument("--root-model", default=None, help="Root model override")
+    p_init.add_argument("--sub-model", default=None, help="Sub-LLM model override")
+    p_init.add_argument("--max-turns", type=int, default=None, help="Max REPL turns")
+    p_init.set_defaults(func=cli_commands.cmd_init)
+
+    # context command
+    p_context = subparsers.add_parser("context", help="Output cold-start prompt")
+    p_context.add_argument("--path", default=".", help="Project path (default: current directory)")
+    p_context.add_argument("--copy", action="store_true", help="Copy to clipboard")
+    p_context.set_defaults(func=cli_commands.cmd_context)
+
+    # refresh command
+    p_refresh = subparsers.add_parser("refresh", help="Update project context")
+    p_refresh.add_argument("--path", default=".", help="Project path")
+    p_refresh.add_argument(
+        "--full", action="store_true", help="Full re-analysis (ignore diff)"
+    )
+    p_refresh.add_argument(
+        "-q", "--quiet", action="store_true", help="Suppress verbose output"
+    )
+    p_refresh.set_defaults(func=cli_commands.cmd_refresh)
+
+    # log command
+    p_log = subparsers.add_parser("log", help="Record or view session activity")
+    p_log.add_argument(
+        "action",
+        nargs="?",
+        default=None,
+        help="'show' to view entries, or omit to log a message",
+    )
+    p_log.add_argument(
+        "message",
+        nargs="?",
+        default=None,
+        help="Message to log (when not using 'show')",
+    )
+    p_log.add_argument(
+        "--count",
+        type=int,
+        default=5,
+        help="Number of entries to show (with 'show')",
+    )
+    p_log.add_argument("--path", default=".", help="Project path")
+    p_log.set_defaults(func=cli_commands.cmd_log)
+
+    # status command
+    p_status = subparsers.add_parser("status", help="Show context health")
+    p_status.add_argument("--path", default=".", help="Project path")
+    p_status.set_defaults(func=cli_commands.cmd_status)
 
     args = parser.parse_args()
 
