@@ -14,7 +14,7 @@ class ProjectConfig:
     version: int = 1
     root_model: str = "anthropic/claude-sonnet-4-6"
     sub_model: str = "minimax/minimax-m2.5"
-    max_turns: int = 10
+    max_turns: int = 20
     cost_limit: float = 2.00
     context_max_tokens: int = 3000
     session_log_count: int = 3

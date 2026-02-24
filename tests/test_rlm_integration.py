@@ -13,7 +13,7 @@ t0 = time.time()
 result = run_analysis(
     codebase_path=TEST_PATH,
     verbose=True,
-    max_turns=10,  # cap at 10 for test
+    max_turns=20,  # cap at 20 for test
 )
 elapsed = time.time() - t0
 

@@ -1,0 +1,15 @@
+version: 1
+root_model: anthropic/claude-sonnet-4-6
+sub_model: minimax/minimax-m2.5
+max_turns: 20
+cost_limit: 2.0
+context_max_tokens: 3000
+session_log_count: 3
+include_scratchpad: true
+include_tech_debt: true
+auto_refresh: false
+stale_threshold_hours: 72
+project_name: deeprepo-cli
+project_description: python project
+team: analyst
+ignore_paths: []
