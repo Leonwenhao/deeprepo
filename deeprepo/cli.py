@@ -347,6 +347,11 @@ def main():
         action="store_true",
         help="Enable debug logging (or set DEEPREPO_DEBUG=1)",
     )
+    parser.add_argument(
+        "--no-update-check",
+        action="store_true",
+        help="Disable checking PyPI for newer versions",
+    )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # Common arguments
@@ -527,6 +532,15 @@ def main():
         logger.debug("Runtime error during CLI execution", exc_info=True)
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+    finally:
+        # The TUI prints update notices during shell welcome to avoid duplicate banners.
+        if args.command != "tui" and not getattr(args, "no_update_check", False):
+            try:
+                from .update_check import check_for_update
+
+                check_for_update(quiet=bool(getattr(args, "quiet", False)))
+            except Exception:
+                logger.debug("Post-command update check failed silently", exc_info=True)
 
 
 if __name__ == "__main__":

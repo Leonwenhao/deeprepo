@@ -17,6 +17,7 @@ Thumbs.db
 .idea/
 *.swp
 *.log
+archive/
 # Internal planning/scratchpad docs
 SCRATCHPAD_*.md
 *_DIAGNOSIS.md

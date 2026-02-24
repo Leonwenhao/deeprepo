@@ -218,6 +218,13 @@ class DeepRepoShell:
             print("Type /help for commands, /quit to exit, or just ask anything.")
             print()
 
+        try:
+            from deeprepo.update_check import check_for_update
+
+            check_for_update()
+        except Exception:
+            logger.debug("Welcome-time update check failed silently", exc_info=True)
+
     def _print_goodbye(self):
         """Print exit message."""
         try:
