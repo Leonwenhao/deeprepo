@@ -1,167 +1,220 @@
 # deeprepo
 
-Your AI tools forget everything between sessions. deeprepo gives them memory.
-
-Run `deeprepo` in any project directory and drop into an interactive session — slash commands for project infrastructure, natural language for generating context-rich prompts that copy straight to your clipboard. Paste into Claude Code, Codex, Cursor, or any AI tool. No more re-explaining your codebase every session.
-
-## Quickstart
-
-```bash
-pip install deeprepo-cli
-cd your-project/
-deeprepo
-```
-
-The first time, deeprepo walks you through API key setup and project initialization. After that, you're in a persistent session:
+**AI project memory for every coding tool.** Analyze your project once, paste context anywhere. No more re-explaining your architecture to Claude, Cursor, Codex, or ChatGPT at the start of every session.
 
 ```
-╭──────────────────────────────────────────────────╮
-│  deeprepo v0.2.0                                 │
-│  Project: your-project                           │
-│  Context: Fresh · 3,008 tokens · 23 files        │
-│                                                  │
-│  Type /help for commands or ask anything.        │
-╰──────────────────────────────────────────────────╯
-deeprepo> fix the broken WebSocket connection
-OK: Copied prompt (4,200 tokens, 3 files) to clipboard
+$ pipx install deeprepo-cli
+$ deeprepo
 ```
 
-Type natural language and deeprepo assembles your project context + relevant files + your ask into a clipboard-ready prompt. Paste it into any AI coding tool.
+DeepRepo analyzes your codebase using recursive multi-model orchestration, then generates a `.deeprepo/` directory with everything an AI tool needs to understand your project. Run `deeprepo context --copy`, paste into any tool, and the cold start tax disappears.
+
+**Cost:** $0.43–$0.95 per project analysis. The sub-LLM layer is essentially free (~2% of total cost).
+
+## How It Works
+
+```
+pipx install deeprepo-cli    # Install once
+deeprepo                      # Launch interactive TUI
+/init                         # Analyze your project → generates .deeprepo/
+/context                      # Copy project context to clipboard
+                              # Paste into any AI tool. Done.
+```
+
+DeepRepo launches into an interactive shell with guided onboarding. First-time users are walked through API key setup, project initialization, and their first context generation — no README required.
+
+### What `.deeprepo/` Contains
+
+When you run `/init`, DeepRepo generates a project memory directory:
+
+| File | Purpose |
+|------|---------|
+| `PROJECT.md` | Full project bible — architecture, patterns, decisions, dependencies |
+| `COLD_START.md` | Compressed context prompt optimized for pasting into AI tools |
+| `SESSION_LOG.md` | Running log of what's happened across sessions |
+| `SCRATCHPAD.md` | Working notes for multi-agent coordination |
+| `config.yaml` | Project settings, model preferences, team configuration |
+
+The `COLD_START.md` is the key artifact. It's a compressed representation of your entire project that fits within AI tool context windows and gives any model instant project awareness.
+
+## The Interactive TUI
+
+Run `deeprepo` with no arguments to enter the interactive shell:
+
+```
+ ██████╗ ███████╗███████╗██████╗ ██████╗ ███████╗██████╗  ██████╗
+ ██╔══██╗██╔════╝██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗██╔═══██╗
+ ██║  ██║█████╗  █████╗  ██████╔╝██████╔╝█████╗  ██████╔╝██║   ██║
+ ██║  ██║██╔══╝  ██╔══╝  ██╔═══╝ ██╔══██╗██╔══╝  ██╔═══╝ ██║   ██║
+ ██████╔╝███████╗███████╗██║     ██║  ██║███████╗██║     ╚██████╔╝
+ ╚═════╝ ╚══════╝╚══════╝╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝      ╚═════╝
+
+deeprepo>
+```
+
+### Slash Commands
+
+| Command | What It Does |
+|---------|-------------|
+| `/init` | Analyze your project and generate `.deeprepo/` context |
+| `/context` | Copy project context to clipboard |
+| `/status` | Check context freshness and project health |
+| `/log` | View session history |
+| `/config` | Show current configuration |
+| `/help` | List all available commands |
+| `/quit` | Exit the shell |
+
+Natural language works too — type questions or instructions and DeepRepo routes them through the RLM engine. The TUI is the primary interface, but every command also works as a CLI flag for scripting and CI.
+
+## Why This Exists
+
+Every AI coding tool starts every session from zero. They don't know your architecture, your conventions, your decisions. You re-explain the same context every time.
+
+DeepRepo generates a persistent project memory that any tool can consume. Analyze once, paste anywhere — Claude Code, Cursor, Codex, ChatGPT, or any tool that accepts text context.
+
+DeepRepo sits in a unique position between three categories:
+
+- **Multi-agent frameworks** (CrewAI, MetaGPT) remove the human — DeepRepo keeps you in the loop
+- **AI coding agents** (Claude Code, Codex, Cursor) have zero awareness of each other — DeepRepo is the coordination layer
+- **Single-tool memory** (CLAUDE.md) is locked to one tool — DeepRepo is memory for your whole workflow
 
 ## Install
 
+### Prerequisites
+
+- Python 3.11+
+- An [Anthropic API key](https://console.anthropic.com/) (for the root orchestrator model)
+- An [OpenRouter API key](https://openrouter.ai/) (for sub-LLM workers)
+
+### macOS (recommended)
+
+```bash
+pipx install deeprepo-cli
+```
+
+### pip
+
 ```bash
 pip install deeprepo-cli
 ```
 
-Requires Python 3.11+. One dependency: an [OpenRouter](https://openrouter.ai/keys) API key for the initial project analysis (~$0.50 one-time cost).
+Then run `deeprepo` and follow the interactive onboarding.
 
-## What it generates
-
-```
-.deeprepo/
-├── config.yaml      # project configuration
-├── PROJECT.md       # full project analysis (architecture, patterns, conventions)
-├── COLD_START.md    # compressed context prompt optimized for AI consumption
-├── SESSION_LOG.md   # running development history
-└── SCRATCHPAD.md    # working notes for multi-agent coordination
-```
-
-`PROJECT.md` is the complete analysis. `COLD_START.md` is the same content compressed to fit inside a context window — typically under 3,000 tokens. That's what gets included in every prompt you generate.
-
-## Interactive TUI
-
-Running `deeprepo` with no arguments launches the interactive session:
-
-**Slash commands** map to project infrastructure:
-
-| Command | What it does |
-|---------|-------------|
-| `/init` | Analyze project and generate .deeprepo/ context |
-| `/context` | Copy cold-start prompt to clipboard |
-| `/context --format cursor` | Write .cursorrules file |
-| `/status` | Show project context health |
-| `/log add <message>` | Record development activity |
-| `/refresh` | Diff-aware context update |
-| `/help` | List all commands |
-
-**Natural language** builds context-rich prompts:
-
-```
-deeprepo> add rate limiting to the API endpoints
-OK: Copied prompt (5,100 tokens, 4 files) to clipboard
-```
-
-deeprepo reads your COLD_START.md, finds files matching your keywords, assembles everything into a structured prompt, and copies it to your clipboard. Paste into any AI tool.
-
-**Keybindings:** Tab for autocomplete, Ctrl-L to clear, Ctrl-R to refresh context.
-
-## CLI mode
-
-Every command also works as a one-shot CLI call:
+### CLI Usage (non-interactive)
 
 ```bash
-deeprepo init .                   # Analyze project, generate .deeprepo/
-deeprepo context --copy           # Copy cold-start prompt to clipboard
-deeprepo context --format cursor  # Write .cursorrules file
-deeprepo refresh --full           # Full re-analysis
-deeprepo status                   # Context health dashboard
-deeprepo log "fixed auth bug"     # Record session activity
-deeprepo tui /path/to/project     # Launch TUI for a specific path
+deeprepo init .              # Generate project memory
+deeprepo context --copy      # Copy context to clipboard
+deeprepo status              # Check context health
+deeprepo new                 # Scaffold .deeprepo/ for a greenfield project
 ```
 
-## How it works
+## Domain-Agnostic Architecture
 
-deeprepo uses a Recursive Language Model (RLM) pattern — a root LLM operates in a Python REPL loop, exploring your codebase and dispatching focused analysis tasks to cheap sub-LLM workers.
+DeepRepo isn't just for code. The RLM engine supports pluggable analysis domains through configurable `DomainConfig` dataclasses:
+
+| Domain | Use Case |
+|--------|----------|
+| **Code** | Codebase architecture, patterns, dependencies, tech debt |
+| **Content** | Marketing documents, content libraries, editorial workflows |
+| **Context** | General project documentation and knowledge bases |
+
+Same engine, any document corpus. New domains are added by defining a config — no engine changes required.
+
+## How the Engine Works
+
+Under the hood, DeepRepo implements the [Recursive Language Model](https://arxiv.org/abs/2512.24601) pattern. A root LLM (Claude Sonnet 4.6) writes Python in a REPL loop, exploring your codebase programmatically rather than trying to cram it into a single context window. When it needs to analyze specific files, it dispatches focused tasks to cheap sub-LLM workers (MiniMax M2.5 via OpenRouter).
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Root Orchestrator (Claude Sonnet 4.5)          │
+│  Root Orchestrator (Claude Sonnet 4.6)          │
 │                                                  │
 │  Sees: file tree, metadata, sizes               │
 │  Does NOT see: actual file contents              │
 │                                                  │
 │  Writes Python → explores codebase → dispatches  │
-│  analysis tasks → synthesizes findings           │
+│  analysis tasks → synthesizes into PROJECT.md    │
 └──────────────────┬──────────────────────────────┘
                    │ llm_query() / llm_batch()
                    ▼
 ┌─────────────────────────────────────────────────┐
-│  Sub-LLM Workers (MiniMax M2.5)                 │
+│  Sub-LLM Workers (MiniMax M2.5 via OpenRouter)  │
 │                                                  │
-│  Each worker gets ONE focused task:              │
-│  "Analyze auth.py for security issues"           │
-│  "Map the data flow in this module"              │
+│  Focused tasks: "summarize auth flow in this     │
+│  module", "list exports", "describe data flow"   │
 │                                                  │
 │  Cost: ~$0.002 per file analysis                 │
 └─────────────────────────────────────────────────┘
 ```
 
-The root model never sees raw file contents — it writes Python code to explore, dispatches individual files to cheap workers, and synthesizes findings across turns. All sub-LLM calls go through OpenRouter, so one API key gives you access to every model.
+The root model never loads your entire codebase into its context. It navigates programmatically and delegates, which means it scales to any codebase size without hitting context window limits.
 
-## Benchmarks
+### Engine Performance
 
-The RLM engine was benchmarked on FastAPI (47 files) — same codebase, same task, two approaches:
+Tested on real projects:
 
-| Metric | Sonnet RLM | Opus Baseline |
-|--------|:----------:|:-------------:|
-| Total cost | $0.46 | $0.99 |
-| Sub-LLM calls | 13 | N/A |
-| Sub-LLM cost | $0.02 | N/A |
-| Files covered | 47/47 (100%) | 42/47 (89%) |
+| Project | Type | Turns | Sub-LLM Calls | Cost | Output |
+|---------|------|-------|---------------|------|--------|
+| DeepRepo | Python CLI + TUI | 10 | 9 | $0.95 | Full project bible |
+| PokerPot | TypeScript/Next.js/Solidity | 9 | 6 | $0.43 | 462-line architecture + security analysis |
 
-The 5 files the baseline missed account for 74% of FastAPI's codebase by size — including the core FastAPI class, routing engine, and dependency injection system. The coverage gap widens with scale: the baseline dropped to 48% on a 289-file codebase while the RLM maintained 100%.
+### Benchmark: RLM vs Single-Model
 
-Full data in [BENCHMARK_RESULTS.md](BENCHMARK_RESULTS.md).
+From our research phase, tested against a 289-file TypeScript/React codebase (2.07M chars):
+
+| Configuration | Root Model | Cost | Sub-LLM Calls | Files Analyzed | Grade |
+|---------------|-----------|------|---------------|----------------|-------|
+| **RLM (recommended)** | Sonnet | **$0.74** | 9 | ~35 | B |
+| RLM (exhaustive) | Opus | $5.04 | 61 | 225 | A |
+| Baseline (single call) | Opus | $1.39 | — | 108 | B+ |
+
+The baseline crammed 48% of files into a single context window. Every deep finding that only the RLM discovered existed in files the baseline couldn't see. On larger codebases, baseline coverage drops below 20% — the RLM scales regardless of size.
 
 ## Configuration
 
+### Model Selection
+
+Default configuration uses **Claude Sonnet 4.6** as root orchestrator and **MiniMax M2.5** as sub-LLM workers. Override via CLI flags:
+
 ```bash
-# Required: OpenRouter key for sub-LLM workers + alternative root models
-export OPENROUTER_API_KEY=sk-or-...
+# Use Opus for maximum quality (more expensive)
+deeprepo init . --root-model claude-opus-4-6
 
-# Optional: Anthropic key for Claude root models (falls back to OpenRouter)
-export ANTHROPIC_API_KEY=sk-ant-...
+# Adjust max REPL turns (default: 20)
+deeprepo init . --max-turns 30
 ```
 
-Or let deeprepo set it up for you — the interactive onboarding saves your key to `~/.deeprepo/config.yaml` on first run.
+### Teams
 
-After `deeprepo init`, project settings live in `.deeprepo/config.yaml`:
+Named agent compositions let you define reusable analysis configurations — which root model, which workers, what analysis focus, what output format. Create a team once, invoke it by name.
 
-```yaml
-root_model: anthropic/claude-sonnet-4-5
-sub_model: minimax/minimax-m2.5
-context_max_tokens: 3000
-include_tech_debt: true
+### Cost Estimates
+
+| Codebase Size | Estimate | Estimated Time |
+|--------------|---------------|----------------|
+| Small (<50 files) | $0.20–0.50 | 1–3 min |
+| Medium (50–300 files) | $0.50–1.50 | 3–8 min |
+| Large (300+ files) | $1.00–3.00 | 5–15 min |
+
+Sub-LLM costs are negligible regardless of codebase size.
+
+## Built On
+
+- [Recursive Language Models](https://arxiv.org/abs/2512.24601) (MIT, 2025) — the RLM pattern
+- [Prime Intellect RLM Extensions](https://www.primeintellect.ai/blog/rlm) — parallel dispatch, answer variable pattern
+- [MiniMax M2.5](https://www.minimax.io/) — sub-LLM worker model
+- [Anthropic Claude](https://www.anthropic.com/) — root orchestrator model
+
+## Contributing
+
+DeepRepo is open source under the MIT license. Issues and PRs welcome.
+
+```bash
+git clone https://github.com/Leonwenhao/deeprepo.git
+cd deeprepo
+pip install -e ".[dev]"
+pytest
 ```
-
-Short aliases work on the CLI: `--root-model sonnet`, `--root-model opus`, `--sub-model minimax`.
-
-## Roadmap
-
-- **Teams** — named multi-agent compositions for different analysis workflows
-- **More `--format` targets** — Windsurf, Aider, generic system prompt
-- **Embeddings-based file matching** — smarter relevant file detection in prompt builder
 
 ## License
 
