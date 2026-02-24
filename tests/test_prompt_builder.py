@@ -1,5 +1,6 @@
 """Tests for TUI prompt builder."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -129,6 +130,54 @@ def test_clipboard_failure_returns_copied_false(tmp_path: Path, monkeypatch) -> 
 
     assert result["status"] == "success"
     assert result["data"]["copied"] is False
+
+
+def test_clipboard_failure_debug_log_present_when_enabled(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    _setup_project(tmp_path)
+    builder = PromptBuilder(str(tmp_path))
+
+    pyperclip = pytest.importorskip("pyperclip")
+
+    def _boom(_: str) -> None:
+        raise RuntimeError("clipboard unavailable")
+
+    monkeypatch.setattr(pyperclip, "copy", _boom)
+    caplog.set_level(logging.DEBUG, logger="deeprepo.tui.prompt_builder")
+
+    builder.build("fix websocket")
+
+    assert any(
+        "Clipboard copy failed in PromptBuilder" in record.message
+        for record in caplog.records
+    )
+
+
+def test_clipboard_failure_debug_log_absent_by_default(
+    tmp_path: Path,
+    monkeypatch,
+    caplog,
+) -> None:
+    _setup_project(tmp_path)
+    builder = PromptBuilder(str(tmp_path))
+
+    pyperclip = pytest.importorskip("pyperclip")
+
+    def _boom(_: str) -> None:
+        raise RuntimeError("clipboard unavailable")
+
+    monkeypatch.setattr(pyperclip, "copy", _boom)
+    caplog.set_level(logging.INFO, logger="deeprepo.tui.prompt_builder")
+
+    builder.build("fix websocket")
+
+    assert not any(
+        "Clipboard copy failed in PromptBuilder" in record.message
+        for record in caplog.records
+    )
 
 
 def test_assemble_prompt_structure(tmp_path: Path) -> None:

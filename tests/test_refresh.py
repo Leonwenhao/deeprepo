@@ -146,6 +146,52 @@ def test_refresh_full(initialized_project: Path) -> None:
     assert result["turns"] == 4
 
 
+def test_refresh_full_propagates_partial_status(initialized_project: Path) -> None:
+    from deeprepo.refresh import RefreshEngine
+
+    cm = ConfigManager(str(initialized_project))
+    config = cm.load_config()
+    state = cm.load_state()
+
+    mock_result = {
+        "analysis": "## Identity\nPartial full refresh\n",
+        "turns": 4,
+        "status": "partial",
+        "usage": _make_mock_usage(),
+    }
+
+    engine = RefreshEngine(str(initialized_project), config, state)
+
+    with patch("deeprepo.rlm_scaffold.run_analysis", return_value=mock_result):
+        result = engine.refresh(full=True)
+
+    assert result["status"] == "partial"
+
+
+def test_refresh_with_changes_propagates_failed_status(initialized_project: Path) -> None:
+    from deeprepo.refresh import RefreshEngine
+
+    cm = ConfigManager(str(initialized_project))
+    config = cm.load_config()
+    state = cm.load_state()
+
+    (initialized_project / "src" / "main.py").write_text("# changed\n", encoding="utf-8")
+
+    mock_result = {
+        "analysis": "## Identity\nFailed incremental refresh\n",
+        "turns": 2,
+        "status": "failed",
+        "usage": _make_mock_usage(),
+    }
+
+    engine = RefreshEngine(str(initialized_project), config, state)
+
+    with patch("deeprepo.rlm_scaffold.run_analysis", return_value=mock_result):
+        result = engine.refresh(full=False)
+
+    assert result["status"] == "failed"
+
+
 def test_refresh_updates_state_hashes(initialized_project: Path) -> None:
     from deeprepo.refresh import RefreshEngine
 

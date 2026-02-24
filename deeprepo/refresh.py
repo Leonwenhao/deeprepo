@@ -54,12 +54,16 @@ class RefreshEngine:
             self.state.analysis_cost = result["usage"].total_cost
             self.state.analysis_turns = result["turns"]
             self.state.sub_llm_dispatches = result["usage"].sub_calls
+            analysis_status = result.get("status", "completed")
+            refresh_status = (
+                "refreshed" if analysis_status == "completed" else analysis_status
+            )
 
             return {
                 "changed_files": len(self.state.file_hashes),
                 "cost": result["usage"].total_cost,
                 "turns": result["turns"],
-                "status": "refreshed",
+                "status": refresh_status,
             }
 
         changes = self.get_changes()
@@ -92,10 +96,14 @@ class RefreshEngine:
         self.state.analysis_cost = result["usage"].total_cost
         self.state.analysis_turns = result["turns"]
         self.state.sub_llm_dispatches = result["usage"].sub_calls
+        analysis_status = result.get("status", "completed")
+        refresh_status = (
+            "refreshed" if analysis_status == "completed" else analysis_status
+        )
 
         return {
             "changed_files": changed_count,
             "cost": result["usage"].total_cost,
             "turns": result["turns"],
-            "status": "refreshed",
+            "status": refresh_status,
         }

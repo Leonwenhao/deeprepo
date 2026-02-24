@@ -132,6 +132,7 @@ class RootModelClient:
         max_tokens: int = 8192,
         temperature: float = 0.0,
         tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
         stream: bool = False,
     ) -> str:
         """Send a message to the root model and return the text response.
@@ -152,6 +153,8 @@ class RootModelClient:
             kwargs["system"] = system
         if tools:
             kwargs["tools"] = tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = tool_choice
 
         if stream:
             @retry_with_backoff()
@@ -221,6 +224,7 @@ class OpenRouterRootClient:
         max_tokens: int = 8192,
         temperature: float = 0.0,
         tools: list[dict] | None = None,
+        tool_choice: dict | None = None,
         stream: bool = False,
     ) -> str:
         """Send a message to the root model and return the text response."""
@@ -251,6 +255,12 @@ class OpenRouterRootClient:
                     },
                 })
             kwargs["tools"] = openai_tools
+        if tool_choice is not None:
+            kwargs["tool_choice"] = (
+                "required"
+                if isinstance(tool_choice, dict) and tool_choice.get("type") == "any"
+                else tool_choice
+            )
 
         @retry_with_backoff()
         def _call():

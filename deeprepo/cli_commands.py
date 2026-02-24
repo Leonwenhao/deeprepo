@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import hashlib
+import logging
 import os
 from pathlib import Path
 import re
@@ -11,6 +12,8 @@ import sys
 
 from .config_manager import ProjectState
 from . import terminal_ui as ui
+
+logger = logging.getLogger(__name__)
 
 
 ROOT_MODEL_MAP = {
@@ -115,19 +118,35 @@ def cmd_init(args, *, quiet=None):
     generated_files = generator.generate(result["analysis"], state)
     cm.save_state(state)
 
+    analysis_status = result.get("status", "completed")
+
     if not quiet:
-        ui.print_init_complete(
-            generated_files,
-            result["usage"].total_cost,
-            result["turns"],
-            result["usage"].sub_calls,
-        )
-        ui.print_msg()
-        ui.print_msg("Next steps:")
-        ui.print_msg("  deeprepo context --copy   # Copy cold-start to clipboard")
-        ui.print_msg('  deeprepo log "message"    # Record session activity')
-        ui.print_msg("  deeprepo status           # Check context health")
-        ui.print_onboarding()
+        if analysis_status == "completed":
+            ui.print_init_complete(
+                generated_files,
+                result["usage"].total_cost,
+                result["turns"],
+                result["usage"].sub_calls,
+            )
+            ui.print_msg()
+            ui.print_msg("Next steps:")
+            ui.print_msg("  deeprepo context --copy   # Copy cold-start to clipboard")
+            ui.print_msg('  deeprepo log "message"    # Record session activity')
+            ui.print_msg("  deeprepo status           # Check context health")
+            ui.print_onboarding()
+        elif analysis_status == "partial":
+            ui.print_init_partial(
+                generated_files=generated_files,
+                cost=result["usage"].total_cost,
+                turns=result["turns"],
+                max_turns=max_turns,
+            )
+        else:
+            ui.print_init_failed(
+                cost=result["usage"].total_cost,
+                turns=result["turns"],
+                max_turns=max_turns,
+            )
 
     return {
         "status": "success",
@@ -138,6 +157,7 @@ def cmd_init(args, *, quiet=None):
             "cost": result["usage"].total_cost,
             "turns": result["turns"],
             "sub_dispatches": result["usage"].sub_calls,
+            "analysis_status": analysis_status,
             "generated_files": list(generated_files.values()),
         },
     }
@@ -272,6 +292,7 @@ def cmd_context(args, *, quiet=False):
     try:
         content = generator.update_cold_start()
     except FileNotFoundError as exc:
+        logger.debug("COLD_START regeneration failed in cmd_context", exc_info=True)
         if not quiet:
             ui.print_error(str(exc))
             ui.print_msg("Run 'deeprepo init' to generate project context.")
@@ -306,6 +327,7 @@ def cmd_context(args, *, quiet=False):
                 },
             }
         except Exception:
+            logger.debug("Clipboard copy failed in cmd_context", exc_info=True)
             token_est = len(content) // 4
             if not quiet:
                 ui.print_msg("Could not copy to clipboard. Printing to stdout instead:")
@@ -399,6 +421,7 @@ def cmd_log(args, *, quiet=False):
     try:
         generator.update_cold_start()
     except FileNotFoundError:
+        logger.debug("Skipped cold-start regeneration after log append", exc_info=True)
         pass
 
     if not quiet:
@@ -659,17 +682,47 @@ def cmd_refresh(args, *, quiet=None):
 
     result = engine.refresh(full=full)
     cm.save_state(state)
+    refresh_status = result.get("status", "refreshed")
 
     if not quiet:
-        ui.print_refresh_complete(result["changed_files"], result["cost"], result["turns"])
+        if refresh_status in ("completed", "refreshed"):
+            ui.print_refresh_complete(
+                result["changed_files"],
+                result["cost"],
+                result["turns"],
+            )
+        elif refresh_status == "partial":
+            ui.print_refresh_partial(
+                changed_files=result["changed_files"],
+                cost=result["cost"],
+                turns=result["turns"],
+                max_turns=config.max_turns,
+            )
+        else:
+            ui.print_refresh_failed(
+                changed_files=result["changed_files"],
+                cost=result["cost"],
+                turns=result["turns"],
+                max_turns=config.max_turns,
+            )
+
+    if refresh_status in ("completed", "refreshed"):
+        message = f"Refreshed {result['changed_files']} files"
+    elif refresh_status == "partial":
+        message = f"Refresh partially complete ({result['changed_files']} files)"
+    elif refresh_status == "failed":
+        message = "Refresh failed"
+    else:
+        message = f"Refresh status: {refresh_status}"
 
     return {
         "status": "success",
-        "message": f"Refreshed {result['changed_files']} files",
+        "message": message,
         "data": {
             "changed_files": result["changed_files"],
             "cost": result["cost"],
             "turns": result["turns"],
+            "refresh_status": refresh_status,
         },
     }
 
@@ -729,6 +782,7 @@ def compute_file_hashes(project_path: Path) -> dict[str, str]:
             try:
                 digest = hashlib.sha256(file_path.read_bytes()).hexdigest()
             except (OSError, PermissionError):
+                logger.debug("Failed to hash file during status/refresh diff scan", exc_info=True)
                 continue
 
             relative = str(file_path.relative_to(project_path))
@@ -763,6 +817,7 @@ def _copy_to_clipboard(text: str) -> None:
         if proc.returncode == 0:
             return
     except FileNotFoundError:
+        logger.debug("xclip not available for clipboard copy", exc_info=True)
         pass
 
     try:
@@ -774,6 +829,7 @@ def _copy_to_clipboard(text: str) -> None:
         if proc.returncode == 0:
             return
     except FileNotFoundError:
+        logger.debug("xsel not available for clipboard copy", exc_info=True)
         pass
 
     raise RuntimeError("No clipboard tool available")

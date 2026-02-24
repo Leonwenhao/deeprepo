@@ -5,6 +5,7 @@ from pathlib import Path
 from .config_manager import ConfigManager, ProjectConfig
 from .context_generator import ContextGenerator
 from .teams.base import TeamConfig
+from .utils import retry_with_backoff
 
 
 class ProjectScaffolder:
@@ -169,11 +170,20 @@ class ProjectScaffolder:
             base_url="https://openrouter.ai/api/v1",
         )
 
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=8192,
-            temperature=0.0,
-        )
+        @retry_with_backoff()
+        def _call():
+            return client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=8192,
+                temperature=0.0,
+            )
+
+        try:
+            response = _call()
+        except Exception as e:
+            raise RuntimeError(
+                f"Scaffold LLM error on {model} after retries: {e}"
+            ) from e
 
         return response.choices[0].message.content or ""

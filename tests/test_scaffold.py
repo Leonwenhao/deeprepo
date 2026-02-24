@@ -3,8 +3,11 @@
 import argparse
 import sys
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
+import httpx
+import openai
 import pytest
 
 from deeprepo.config_manager import ConfigManager
@@ -166,6 +169,61 @@ def test_scaffold_state_has_created_with_new(scaffolder, tmp_path: Path) -> None
     )
     assert "Project created with deeprepo new" in session_log
     assert description in session_log
+
+
+def test_call_llm_retries_on_transient_timeout(scaffolder) -> None:
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+    )
+
+    client = MagicMock()
+    client.chat.completions.create.side_effect = [
+        openai.APITimeoutError(request=request),
+        response,
+    ]
+
+    with (
+        patch.dict(
+            "os.environ",
+            {"OPENROUTER_API_KEY": "test-openrouter-key"},
+            clear=False,
+        ),
+        patch("openai.OpenAI", return_value=client),
+        patch("deeprepo.utils.random.uniform", return_value=0.0),
+        patch("deeprepo.utils.time.sleep"),
+    ):
+        result = scaffolder._call_llm("hello")
+
+    assert result == "ok"
+    assert client.chat.completions.create.call_count == 2
+
+
+def test_call_llm_raises_runtime_error_after_retries(scaffolder) -> None:
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+
+    client = MagicMock()
+
+    def _always_timeout(*_args, **_kwargs):
+        raise openai.APITimeoutError(request=request)
+
+    client.chat.completions.create.side_effect = _always_timeout
+
+    with (
+        patch.dict(
+            "os.environ",
+            {"OPENROUTER_API_KEY": "test-openrouter-key"},
+            clear=False,
+        ),
+        patch("openai.OpenAI", return_value=client),
+        patch("deeprepo.utils.random.uniform", return_value=0.0),
+        patch("deeprepo.utils.time.sleep") as sleep_mock,
+    ):
+        with pytest.raises(RuntimeError, match="Scaffold LLM error"):
+            scaffolder._call_llm("hello")
+
+    assert client.chat.completions.create.call_count == 4
+    assert sleep_mock.call_count == 3
 
 
 def test_parse_stack_string() -> None:

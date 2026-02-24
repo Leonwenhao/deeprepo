@@ -10,8 +10,11 @@ This implements the RLM pattern:
 6. Terminates when answer["ready"] = True or max turns reached
 """
 
+import ast
+import builtins
 import io
 import json
+import os
 import re
 import signal
 import shutil
@@ -20,6 +23,7 @@ import threading
 import time
 import traceback
 from contextlib import redirect_stdout, redirect_stderr
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 from .llm_clients import (
@@ -35,9 +39,57 @@ if TYPE_CHECKING:
 
 
 MAX_OUTPUT_LENGTH = 8192  # Truncate REPL output to force model to use code
-MAX_TURNS = 15            # Maximum REPL iterations
+MAX_TURNS = 20            # Maximum REPL iterations
 DEFAULT_MAX_CONCURRENT = 5  # Max parallel sub-LLM calls
 EXEC_TIMEOUT_SECONDS = 120  # Maximum execution time per code block
+
+SAFE_BUILTIN_NAMES = {
+    "__build_class__",
+    "Exception",
+    "TypeError",
+    "ValueError",
+    "RuntimeError",
+    "AttributeError",
+    "IndexError",
+    "KeyError",
+    "NameError",
+    "AssertionError",
+    "TimeoutError",
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "dict",
+    "enumerate",
+    "filter",
+    "float",
+    "format",
+    "int",
+    "isinstance",
+    "issubclass",
+    "len",
+    "list",
+    "map",
+    "max",
+    "min",
+    "next",
+    "print",
+    "range",
+    "repr",
+    "reversed",
+    "round",
+    "set",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
+}
+
+SAFE_BUILTINS = {
+    name: getattr(builtins, name)
+    for name in SAFE_BUILTIN_NAMES
+}
 
 EXECUTE_CODE_TOOL = {
     "name": "execute_python",
@@ -100,6 +152,7 @@ class RLMEngine:
         Returns:
             {
                 "analysis": str,          # The final analysis document
+                "status": str,            # completed | partial | failed
                 "turns": int,             # Number of REPL turns taken
                 "usage": TokenUsage,      # Token usage and cost tracking
                 "trajectory": list[dict], # Full conversation trajectory
@@ -146,8 +199,13 @@ class RLMEngine:
                 print(f"REPL Turn {turn}/{self.max_turns}")
                 print(f"{'='*60}")
 
+            # Inject turn-budget countdown into the next model call.
+            self._inject_turn_countdown(messages, turn)
+
             # Pre-flight: ensure no empty text content blocks
             self._validate_messages(messages)
+
+            tool_choice = self._tool_choice_for_turn(turn)
 
             # Get root model's response with tool definition
             t0 = time.time()
@@ -155,6 +213,7 @@ class RLMEngine:
                 messages=messages,
                 system=domain.root_system_prompt,
                 tools=[EXECUTE_CODE_TOOL],
+                tool_choice=tool_choice,
                 stream=self.verbose,
             )
             root_time = time.time() - t0
@@ -234,6 +293,7 @@ class RLMEngine:
                 "answer_ready": answer["ready"],
                 "root_latency_s": root_time,
                 "used_tool_use": bool(tool_use_info),
+                "tool_choice": tool_choice,
             })
 
             # Check if answer is ready
@@ -262,17 +322,28 @@ class RLMEngine:
                 })
 
         # 5. Return results
+        status = "completed"
         if not answer["ready"]:
             if self.verbose:
                 print(f"\n⚠️ Max turns ({self.max_turns}) reached without answer[\"ready\"] = True")
             if answer["content"]:
+                status = "partial"
                 if self.verbose:
                     print("Using partial answer from answer[\"content\"]")
             else:
-                answer["content"] = "[Analysis incomplete — max turns reached]"
+                salvaged = self._salvage_incomplete_analysis(trajectory, messages)
+                if salvaged:
+                    answer["content"] = salvaged
+                    status = "partial"
+                    if self.verbose:
+                        print("Recovered partial analysis from REPL trajectory.")
+                else:
+                    answer["content"] = "[Analysis incomplete — max turns reached]"
+                    status = "failed"
 
         return {
             "analysis": answer["content"],
+            "status": status,
             "turns": turn,
             "usage": self.usage,
             "trajectory": trajectory,
@@ -294,7 +365,7 @@ class RLMEngine:
         - codebase, file_tree, metadata (data)
         - llm_query, llm_batch (sub-LLM functions)
         - answer (output variable)
-        - Standard Python builtins
+        - Restricted safe Python builtins
         """
         def llm_query(prompt: str) -> str:
             """Send a focused task to a sub-LLM worker."""
@@ -332,14 +403,159 @@ class RLMEngine:
             "answer": answer,
             # Standard library modules the model might want
             "re": re,
-            "os": __import__("os"),
+            "os": SimpleNamespace(path=os.path),
             "json": __import__("json"),
             "collections": __import__("collections"),
         }
-        # Add builtins
-        namespace["__builtins__"] = __builtins__
+        # Add restricted builtins only.
+        namespace["__builtins__"] = SAFE_BUILTINS
 
         return namespace
+
+    def _tool_choice_for_turn(self, turn: int) -> dict | None:
+        """Force tool use on the final two turns."""
+        if turn >= self.max_turns - 1:
+            return {"type": "any"}
+        return None
+
+    def _turn_countdown_message(self, turn: int) -> str:
+        """Return a turn-budget reminder for the root model."""
+        remaining = self.max_turns - turn
+        prefix = (
+            f"[Turn {turn}/{self.max_turns} - "
+            f"{remaining} turn{'s' if remaining != 1 else ''} remaining]"
+        )
+        if remaining <= 0:
+            return (
+                f"{prefix}\n"
+                "FINAL TURN: You MUST call set_answer(text) now. "
+                "Any unsaved findings will be lost."
+            )
+        if remaining <= 1:
+            return (
+                f"{prefix}\n"
+                "Critical: you are in the final two turns. "
+                "Stop exploring and finalize via set_answer(text)."
+            )
+        if remaining <= 3:
+            return (
+                f"{prefix}\n"
+                "Begin synthesis now and prepare a complete set_answer(text)."
+            )
+        return prefix
+
+    def _inject_turn_countdown(self, messages: list[dict], turn: int) -> None:
+        """Inject turn countdown into the latest user message for this turn."""
+        countdown = self._turn_countdown_message(turn)
+
+        if not messages:
+            messages.append({"role": "user", "content": countdown})
+            return
+
+        last = messages[-1]
+        if last.get("role") != "user":
+            messages.append({"role": "user", "content": countdown})
+            return
+
+        content = last.get("content")
+        if isinstance(content, str):
+            body = content.strip()
+            if body.startswith("[Turn "):
+                lines = body.splitlines()
+                if lines:
+                    lines[0] = countdown
+                    last["content"] = "\n".join(lines)
+                    return
+            last["content"] = f"{countdown}\n\n{body}" if body else countdown
+            return
+
+        if isinstance(content, list):
+            text_block = next(
+                (
+                    block for block in content
+                    if isinstance(block, dict) and block.get("type") == "text"
+                ),
+                None,
+            )
+            if text_block is not None:
+                text_block["text"] = countdown
+            else:
+                content.insert(0, {"type": "text", "text": countdown})
+            return
+
+        last["content"] = countdown
+
+    @staticmethod
+    def _extract_assistant_text(content) -> str:
+        """Extract plain assistant text from serialized message content."""
+        if isinstance(content, str):
+            text = content.strip()
+            if text and not text.startswith("[tool_use:") and text != "[Acknowledged]":
+                return text
+            return ""
+
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") != "text":
+                    continue
+                text = str(block.get("text", "")).strip()
+                if text and text != "[Acknowledged]":
+                    parts.append(text)
+            return "\n".join(parts).strip()
+
+        return ""
+
+    def _salvage_incomplete_analysis(
+        self,
+        trajectory: list[dict],
+        messages: list[dict],
+    ) -> str:
+        """Recover partial output from REPL trajectory when no final answer exists."""
+        parts: list[str] = []
+
+        repl_findings: list[str] = []
+        for step in trajectory:
+            output = step.get("repl_output", "")
+            if not isinstance(output, str):
+                continue
+            output = output.strip()
+            if not output or output == "[No output]":
+                continue
+            repl_findings.append(
+                f"### Turn {step.get('turn', '?')}\n{output}"
+            )
+
+        if repl_findings:
+            parts.append("## Partial REPL Findings")
+            parts.append("\n\n".join(repl_findings))
+
+        last_assistant_text = ""
+        for message in reversed(messages):
+            if message.get("role") != "assistant":
+                continue
+            extracted = self._extract_assistant_text(message.get("content"))
+            if extracted:
+                last_assistant_text = extracted
+                break
+
+        if last_assistant_text:
+            parts.append("## Latest Model Notes")
+            parts.append(last_assistant_text)
+
+        if not parts:
+            return ""
+
+        salvaged = "\n\n".join(parts).strip()
+        hard_limit = self.max_output_length * 2
+        if len(salvaged) > hard_limit:
+            salvaged = (
+                salvaged[:hard_limit]
+                + "\n\n[PARTIAL OUTPUT TRUNCATED]"
+            )
+        return salvaged
 
     @staticmethod
     def _is_prose_line(line: str) -> bool:
@@ -584,6 +800,10 @@ class RLMEngine:
         """
         for msg in messages:
             content = msg.get("content")
+            if isinstance(content, str):
+                if not content.strip():
+                    msg["content"] = "[Acknowledged]"
+                continue
             if not isinstance(content, list):
                 continue
             # Filter out empty text blocks in-place
@@ -771,8 +991,18 @@ class RLMEngine:
             timer.start()
 
         try:
+            parsed = ast.parse(code, mode="exec")
+            if any(
+                isinstance(node, (ast.Import, ast.ImportFrom))
+                for node in ast.walk(parsed)
+            ):
+                raise PermissionError(
+                    "Import statements are blocked in the REPL. "
+                    "Use preloaded modules: re, json, collections, os.path."
+                )
+
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                exec(code, namespace)
+                exec(compile(parsed, "<repl>", "exec"), namespace)
         except BaseException as exc:
             if isinstance(exc, TimeoutError) or timed_out:
                 stdout_capture.write(
@@ -832,7 +1062,7 @@ def run_analysis(
         domain: Domain name from registry (default: "code")
 
     Returns:
-        dict with analysis, turns, usage, trajectory
+        dict with analysis, status, turns, usage, trajectory
     """
     from .domains import get_domain
 

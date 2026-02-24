@@ -61,6 +61,34 @@ def print_init_complete(
     print_msg(f"  Sub-LLM dispatches: {sub_dispatches}")
 
 
+def print_init_partial(
+    generated_files: dict,
+    cost: float,
+    turns: int,
+    max_turns: int,
+) -> None:
+    """Print warning info when init analysis is only partially complete."""
+    print_msg("Warning: Analysis partially complete.")
+    for path in generated_files.values():
+        print_msg(f"  Saved: {path}")
+    print_msg(f"  Cost: ${cost:.4f}")
+    print_msg(f"  Turns: {turns}/{max_turns}")
+    print_msg("  Partial results were saved to PROJECT.md.")
+    print_msg("  Try: deeprepo init . --force --max-turns 25")
+
+
+def print_init_failed(
+    cost: float,
+    turns: int,
+    max_turns: int,
+) -> None:
+    """Print warning info when init analysis fails to produce results."""
+    print_msg("Analysis failed: no results produced.")
+    print_msg(f"  Cost: ${cost:.4f}")
+    print_msg(f"  Turns: {turns}/{max_turns}")
+    print_msg("  Try a smaller codebase or increase --max-turns.")
+
+
 def print_onboarding() -> None:
     """Print onboarding guidance after init/new."""
     content = (
@@ -154,6 +182,37 @@ def print_refresh_complete(changed_files: int, cost: float, turns: int) -> None:
     print_msg(f"  Changed files: {changed_files}")
     print_msg(f"  Cost: ${cost:.4f}")
     print_msg(f"  Turns: {turns}")
+
+
+def print_refresh_partial(
+    changed_files: int,
+    cost: float,
+    turns: int,
+    max_turns: int,
+) -> None:
+    """Print warning info when refresh analysis is only partially complete."""
+    print_msg()
+    print_msg("Warning: Refresh partially complete.")
+    print_msg(f"  Changed files: {changed_files}")
+    print_msg(f"  Cost: ${cost:.4f}")
+    print_msg(f"  Turns: {turns}/{max_turns}")
+    print_msg("  Partial context updates were saved.")
+    print_msg("  Try: deeprepo refresh --full")
+
+
+def print_refresh_failed(
+    changed_files: int,
+    cost: float,
+    turns: int,
+    max_turns: int,
+) -> None:
+    """Print warning info when refresh analysis fails."""
+    print_msg()
+    print_msg("Refresh failed: analysis did not complete.")
+    print_msg(f"  Changed files: {changed_files}")
+    print_msg(f"  Cost: ${cost:.4f}")
+    print_msg(f"  Turns: {turns}/{max_turns}")
+    print_msg("  Try: deeprepo refresh --full --quiet or increase max_turns in config.")
 
 
 def print_context_copied(token_count: int) -> None:

@@ -265,7 +265,7 @@ def test_strip_tool_use_mixed_response_preserves_text(engine):
 def test_validate_messages_catches_empty_text(engine):
     """Pre-flight validation must fix empty text content blocks."""
     messages = [
-        {"role": "user", "content": "Hello"},
+        {"role": "user", "content": ""},
         {"role": "assistant", "content": [{"type": "text", "text": ""}]},
         {"role": "assistant", "content": [
             {"type": "text", "text": "  "},
@@ -275,8 +275,8 @@ def test_validate_messages_catches_empty_text(engine):
 
     engine._validate_messages(messages)
 
-    # First message (plain string) should be untouched
-    assert messages[0]["content"] == "Hello"
+    # First message had empty string content — should get placeholder
+    assert messages[0]["content"] == "[Acknowledged]"
 
     # Second message had only an empty block — should get placeholder
     content1 = messages[1]["content"]

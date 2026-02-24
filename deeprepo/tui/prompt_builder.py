@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
 
 from deeprepo.codebase_loader import ALL_EXTENSIONS, MAX_FILE_SIZE, SKIP_DIRS
+
+logger = logging.getLogger(__name__)
 
 
 STOPWORDS = {
@@ -162,6 +165,7 @@ class PromptBuilder:
         try:
             cold_start = self._load_cold_start()
         except FileNotFoundError:
+            logger.debug("COLD_START.md missing while building prompt", exc_info=True)
             return {
                 "status": "error",
                 "message": "Run /init first to generate project context",
@@ -228,6 +232,7 @@ class PromptBuilder:
                 try:
                     file_size = file_path.stat().st_size
                 except OSError:
+                    logger.debug("Failed to stat candidate file for prompt inclusion", exc_info=True)
                     continue
 
                 if file_size > MAX_FILE_SIZE:
@@ -257,6 +262,7 @@ class PromptBuilder:
             try:
                 content = file_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
+                logger.debug("Failed to read candidate file for prompt inclusion", exc_info=True)
                 continue
 
             file_tokens = self._estimate_tokens(content)
@@ -309,6 +315,7 @@ class PromptBuilder:
             pyperclip.copy(text)
             return True
         except Exception:
+            logger.debug("Clipboard copy failed in PromptBuilder", exc_info=True)
             return False
 
     def _extract_keywords(self, user_input: str) -> list[str]:

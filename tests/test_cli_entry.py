@@ -1,6 +1,9 @@
 """Tests for S8 CLI entry point wiring."""
 
+import logging
 import sys
+
+import pytest
 
 
 def test_version_is_0_2_2():
@@ -109,3 +112,98 @@ def test_existing_commands_still_work(monkeypatch):
     main()
 
     assert "status" in called
+
+
+def test_analyze_default_max_turns_is_20(monkeypatch):
+    """`deeprepo analyze` should default to 20 max turns."""
+    monkeypatch.setattr(sys, "argv", ["deeprepo", "analyze", "."])
+
+    captured = {}
+
+    def _fake_analyze(args):
+        captured["max_turns"] = args.max_turns
+
+    monkeypatch.setattr("deeprepo.cli.cmd_analyze", _fake_analyze)
+
+    from deeprepo.cli import main
+
+    main()
+
+    assert captured["max_turns"] == 20
+
+
+def test_compare_default_max_turns_is_20(monkeypatch):
+    """`deeprepo compare` should default to 20 max turns."""
+    monkeypatch.setattr(sys, "argv", ["deeprepo", "compare", "."])
+
+    captured = {}
+
+    def _fake_compare(args):
+        captured["max_turns"] = args.max_turns
+
+    monkeypatch.setattr("deeprepo.cli.cmd_compare", _fake_compare)
+
+    from deeprepo.cli import main
+
+    main()
+
+    assert captured["max_turns"] == 20
+
+
+def test_debug_flag_enables_logging_configuration(monkeypatch):
+    """`--debug` should configure DEBUG logging."""
+    monkeypatch.setattr(sys, "argv", ["deeprepo", "--debug", "--no-tui"])
+
+    called = {}
+
+    def _fake_basic_config(**kwargs):
+        called.update(kwargs)
+
+    monkeypatch.setattr("deeprepo.cli.logging.basicConfig", _fake_basic_config)
+
+    from deeprepo.cli import main
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert called["level"] == logging.DEBUG
+
+
+def test_deeprepo_debug_env_enables_logging_configuration(monkeypatch):
+    """DEEPREPO_DEBUG=1 should configure DEBUG logging without --debug."""
+    monkeypatch.setattr(sys, "argv", ["deeprepo", "--no-tui"])
+    monkeypatch.setenv("DEEPREPO_DEBUG", "1")
+
+    called = {}
+
+    def _fake_basic_config(**kwargs):
+        called.update(kwargs)
+
+    monkeypatch.setattr("deeprepo.cli.logging.basicConfig", _fake_basic_config)
+
+    from deeprepo.cli import main
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert called["level"] == logging.DEBUG
+
+
+def test_logging_not_configured_without_debug_flag_or_env(monkeypatch):
+    """Without --debug or env var, logging config should remain unchanged."""
+    monkeypatch.setattr(sys, "argv", ["deeprepo", "--no-tui"])
+    monkeypatch.delenv("DEEPREPO_DEBUG", raising=False)
+
+    called = {"count": 0}
+
+    def _fake_basic_config(**_kwargs):
+        called["count"] += 1
+
+    monkeypatch.setattr("deeprepo.cli.logging.basicConfig", _fake_basic_config)
+
+    from deeprepo.cli import main
+
+    with pytest.raises(SystemExit):
+        main()
+
+    assert called["count"] == 0

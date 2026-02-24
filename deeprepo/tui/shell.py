@@ -1,5 +1,6 @@
 """Interactive TUI shell for deeprepo."""
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -17,6 +18,7 @@ from deeprepo.tui.prompt_builder import PromptBuilder
 from deeprepo.tui.session_state import SessionState
 
 _console = Console()
+logger = logging.getLogger(__name__)
 
 
 class DeepRepoShell:
@@ -120,6 +122,7 @@ class DeepRepoShell:
                 help_text = re.sub(r"(/\w+)", r"[bold cyan]\1[/bold cyan]", data["help_text"])
                 _console.print(help_text)
         except Exception:
+            logger.debug("Falling back to plain result rendering", exc_info=True)
             if status == "error":
                 print(f"Error: {message}")
             elif status == "success":
@@ -137,6 +140,7 @@ class DeepRepoShell:
 
             return version("deeprepo-cli")
         except Exception:
+            logger.debug("Failed to read installed package version", exc_info=True)
             return "dev"
 
     def _get_toolbar(self) -> str:
@@ -206,6 +210,7 @@ class DeepRepoShell:
                 _console.print(line)
             _console.print()
         except Exception:
+            logger.debug("Falling back to plain welcome banner", exc_info=True)
             print("deeprepo")
             print(f"deeprepo v{version}")
             print(f"Project: {project_name}")
@@ -218,4 +223,5 @@ class DeepRepoShell:
         try:
             _console.print("\n[dim cyan]Goodbye.[/dim cyan]")
         except Exception:
+            logger.debug("Falling back to plain goodbye message", exc_info=True)
             print("\nGoodbye.")

@@ -10,6 +10,8 @@ Usage:
 
 import argparse
 import json
+import logging
+import os
 import shutil
 import sys
 import time
@@ -17,9 +19,13 @@ from pathlib import Path
 
 from . import __version__
 from . import cli_commands
+
+logger = logging.getLogger(__name__)
+
 try:
     from .llm_clients import DEFAULT_SUB_MODEL
 except Exception:  # pragma: no cover - environment-specific import issue
+    logger.debug("Failed to import llm_clients.DEFAULT_SUB_MODEL; using fallback", exc_info=True)
     # Fallback keeps CLI help and domain listing usable in environments where
     # llm_clients cannot import due dependency/runtime issues.
     DEFAULT_SUB_MODEL = "minimax/minimax-m2.5"
@@ -30,6 +36,17 @@ ROOT_MODEL_MAP = {
     "sonnet": "claude-sonnet-4-6",
     "minimax": "minimax/minimax-m2.5",
 }
+
+
+def _configure_debug_logging(enabled: bool) -> None:
+    if not enabled:
+        return
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="%(name)s:%(levelname)s: %(message)s",
+        force=True,
+    )
+    logger.debug("Debug logging enabled")
 
 
 def cmd_analyze(args):
@@ -325,6 +342,11 @@ def main():
         action="store_true",
         help="Print help instead of launching interactive TUI when no command is given",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug logging (or set DEEPREPO_DEBUG=1)",
+    )
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # Common arguments
@@ -355,7 +377,7 @@ def main():
 
     # analyze command
     p_analyze = subparsers.add_parser("analyze", parents=[common], help="Run RLM analysis")
-    p_analyze.add_argument("--max-turns", type=int, default=15, help="Max REPL turns")
+    p_analyze.add_argument("--max-turns", type=int, default=20, help="Max REPL turns")
     p_analyze.set_defaults(func=cmd_analyze)
 
     # baseline command
@@ -364,7 +386,7 @@ def main():
 
     # compare command
     p_compare = subparsers.add_parser("compare", parents=[common], help="Run both and compare")
-    p_compare.add_argument("--max-turns", type=int, default=15, help="Max REPL turns for RLM")
+    p_compare.add_argument("--max-turns", type=int, default=20, help="Max REPL turns for RLM")
     p_compare.add_argument(
         "--baseline-model",
         default="opus",
@@ -469,6 +491,9 @@ def main():
     p_status.set_defaults(func=cli_commands.cmd_status)
 
     args = parser.parse_args()
+    _configure_debug_logging(
+        args.debug or os.environ.get("DEEPREPO_DEBUG", "").strip() == "1"
+    )
 
     if not args.command:
         if args.no_tui:
@@ -483,18 +508,23 @@ def main():
     try:
         args.func(args)
     except KeyboardInterrupt:
+        logger.debug("Interrupted by user", exc_info=True)
         print("\nInterrupted.")
         sys.exit(130)
     except EnvironmentError as e:
+        logger.debug("Environment configuration error in CLI", exc_info=True)
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except FileNotFoundError as e:
+        logger.debug("File not found during CLI execution", exc_info=True)
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except ValueError as e:
+        logger.debug("Validation error during CLI execution", exc_info=True)
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
     except RuntimeError as e:
+        logger.debug("Runtime error during CLI execution", exc_info=True)
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 

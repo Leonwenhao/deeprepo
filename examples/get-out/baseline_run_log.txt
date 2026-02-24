@@ -1,0 +1,15 @@
+Loaded 1 files, 100,796 chars
+Sending to Opus 4.6 (single call)...
+Response in 251.0s
+=== Token Usage & Cost ===
+Root (Opus 4.6): 1 calls, 36,820 in / 16,384 out, $1.7811
+Sub (MiniMax M2.5): 0 calls, 0 in / 0 out, $0.0000
+Total cost: $1.7811
+
+📄 Baseline analysis saved to: examples/get-out/baseline_film_get-out-2017.pdf_20260221_220215.md
+📊 Metrics saved to: examples/get-out/baseline_film_get-out-2017.pdf_20260221_220215_metrics.json
+
+=== Token Usage & Cost ===
+Root (Opus 4.6): 1 calls, 36,820 in / 16,384 out, $1.7811
+Sub (MiniMax M2.5): 0 calls, 0 in / 0 out, $0.0000
+Total cost: $1.7811
