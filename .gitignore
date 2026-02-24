@@ -1,3 +1,4 @@
+.deeprepo/
 .env
 __pycache__/
 *.pyc
@@ -7,8 +8,9 @@ venv/
 *.egg-info/
 dist/
 build/
-outputs/*.md
-outputs/*.json
+outputs/
+.pytest_cache/
+.mypy_cache/
 .DS_Store
 Thumbs.db
 .vscode/
