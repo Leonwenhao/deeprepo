@@ -495,6 +495,13 @@ def main():
     p_status.add_argument("--path", default=".", help="Project path")
     p_status.set_defaults(func=cli_commands.cmd_status)
 
+    # install-skill command
+    p_install_skill = subparsers.add_parser(
+        "install-skill",
+        help="Install the deeprepo skill into Claude Code (~/.claude/skills/deeprepo/)",
+    )
+    p_install_skill.set_defaults(func=cli_commands.cmd_install_skill)
+
     args = parser.parse_args()
     _configure_debug_logging(
         args.debug or os.environ.get("DEEPREPO_DEBUG", "").strip() == "1"

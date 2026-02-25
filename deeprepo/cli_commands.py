@@ -833,3 +833,19 @@ def _copy_to_clipboard(text: str) -> None:
         pass
 
     raise RuntimeError("No clipboard tool available")
+
+
+def cmd_install_skill(args):
+    """Install the deeprepo Claude Code skill to ~/.claude/skills/deeprepo/."""
+    skill_src = Path(__file__).parent / "skill" / "SKILL.md"
+    if not skill_src.is_file():
+        ui.print_error(f"SKILL.md not found in package at {skill_src}")
+        sys.exit(1)
+
+    skills_dir = Path.home() / ".claude" / "skills" / "deeprepo"
+    skills_dir.mkdir(parents=True, exist_ok=True)
+    dest = skills_dir / "SKILL.md"
+
+    shutil.copy2(skill_src, dest)
+    ui.print_msg(f"deeprepo skill installed to {dest}")
+    ui.print_msg("Restart Claude Code to activate. Then use /deeprepo in any session.")

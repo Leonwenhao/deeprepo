@@ -40,6 +40,9 @@ Issues = "https://github.com/Leonwenhao/deeprepo/issues"
 [tool.setuptools.packages.find]
 include = ["deeprepo*"]
 
+[tool.setuptools.package-data]
+deeprepo = ["skill/SKILL.md"]
+
 [project.scripts]
 deeprepo = "deeprepo.cli:main"
 
