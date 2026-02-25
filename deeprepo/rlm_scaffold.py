@@ -480,7 +480,13 @@ class RLMEngine:
             if text_block is not None:
                 text_block["text"] = countdown
             else:
-                content.insert(0, {"type": "text", "text": countdown})
+                # Insert AFTER any tool_result blocks so the Anthropic API
+                # sees tool_results before text (required ordering).
+                insert_idx = 0
+                for i, block in enumerate(content):
+                    if isinstance(block, dict) and block.get("type") == "tool_result":
+                        insert_idx = i + 1
+                content.insert(insert_idx, {"type": "text", "text": countdown})
             return
 
         last["content"] = countdown
@@ -836,29 +842,17 @@ class RLMEngine:
             # Anthropic — serialize content blocks to dicts
             content_blocks = []
             for block in response.content:
-                if hasattr(block, "model_dump"):
-                    exclude = getattr(block, "__api_exclude__", None)
-                    serialized = block.model_dump(exclude=exclude)
-                    if strip_tool_use:
-                        if serialized.get("type") != "text":
-                            continue
-                    # Skip empty text blocks — the API rejects them
-                    if serialized.get("type") == "text" and not serialized.get("text", "").strip():
+                if block.type == "text":
+                    if not getattr(block, "text", None) or not block.text.strip():
                         continue
-                    content_blocks.append(serialized)
-                else:
-                    if block.type == "text":
-                        # Skip empty text blocks
-                        if not block.text or not block.text.strip():
-                            continue
-                        content_blocks.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use" and not strip_tool_use:
-                        content_blocks.append({
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        })
+                    content_blocks.append({"type": "text", "text": block.text})
+                elif block.type == "tool_use" and not strip_tool_use:
+                    content_blocks.append({
+                        "type": "tool_use",
+                        "id": block.id,
+                        "name": block.name,
+                        "input": block.input,
+                    })
             if not content_blocks:
                 if strip_tool_use:
                     # All blocks were tool_use; insert a placeholder so the

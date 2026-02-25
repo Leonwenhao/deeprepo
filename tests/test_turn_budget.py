@@ -143,3 +143,53 @@ def test_last_assistant_prose_is_salvaged_when_no_code_runs():
     assert result["status"] == "partial"
     assert "Latest Model Notes" in result["analysis"]
     assert "auth bug in middleware" in result["analysis"]
+
+
+def test_countdown_inserted_after_tool_result_blocks():
+    """Anthropic API requires tool_result blocks before text in user messages."""
+    usage = TokenUsage()
+    engine = RLMEngine(
+        root_client=MagicMock(),
+        sub_client=MagicMock(),
+        usage=usage,
+        max_turns=20,
+        verbose=False,
+    )
+
+    messages = [
+        {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": "toolu_abc", "content": "output1"},
+            {"type": "tool_result", "tool_use_id": "toolu_def", "content": "output2"},
+        ]}
+    ]
+
+    engine._inject_turn_countdown(messages, 2)
+
+    content = messages[-1]["content"]
+    # All tool_result blocks must appear before any text blocks
+    saw_text = False
+    for block in content:
+        if block.get("type") == "text":
+            saw_text = True
+            assert "[Turn 2/20" in block["text"]
+        elif block.get("type") == "tool_result":
+            assert not saw_text, "tool_result found after text block — API will reject this"
+
+
+def test_countdown_on_pure_text_user_message():
+    """Countdown is prepended to string-content user messages."""
+    usage = TokenUsage()
+    engine = RLMEngine(
+        root_client=MagicMock(),
+        sub_client=MagicMock(),
+        usage=usage,
+        max_turns=10,
+        verbose=False,
+    )
+
+    messages = [{"role": "user", "content": "Continue analysis."}]
+    engine._inject_turn_countdown(messages, 3)
+
+    content = messages[-1]["content"]
+    assert isinstance(content, str)
+    assert content.startswith("[Turn 3/10")

@@ -50,6 +50,7 @@ SKIP_DIRS = {
     ".tox", ".pytest_cache", ".mypy_cache", "dist", "build",
     ".next", ".nuxt", "vendor", "target", ".cargo",
     "coverage", ".coverage", "htmlcov",
+    ".deeprepo",
 }
 
 # Max file size to include (500KB — skip giant generated files)
