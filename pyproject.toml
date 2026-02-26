@@ -30,6 +30,7 @@ dependencies = [
     "prompt_toolkit>=3.0.0",
     "pyperclip>=1.8.0",
     "rich>=13.0",
+    "verifiers>=0.1.10",
 ]
 
 [project.urls]

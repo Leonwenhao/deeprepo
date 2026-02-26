@@ -1,4 +1,5 @@
 .deeprepo/
+.prime/
 .env
 __pycache__/
 *.pyc
@@ -35,3 +36,5 @@ RESEARCH_JOURNAL.md
 TUI_DEVELOPMENT_PLAN.md
 AGENT_ORCHESTRATION_PROTOCOL.md
 FILM_VERTICAL_SPRINT.md
+# Reference environments (installed, not ours)
+environments/nyt_connections/
